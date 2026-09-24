@@ -1,0 +1,24 @@
+# Python / numba caches
+__pycache__/
+*.py[cod]
+*.nbi
+*.nbc
+
+# Rendered output (stills, shots, montage, score, caches) -- regenerate with run.py / assemble.py
+out/
+
+# Profiler dumps
+*.out
+*.prof
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

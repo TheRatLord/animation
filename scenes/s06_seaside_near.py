@@ -1,0 +1,360 @@
+"""Near-foreground plates for s06_seaside (the camera trucks past them: strongest parallax).
+
+  back : dark leaf mass + weeds in the bottom-left corner, a concrete utility pole a few metres from the
+         lens (street-lamp arm, drop cable, step bolts, a pole advert and an address plate with real
+         Japanese text), a galvanised pipe fence along the bottom right;
+  front: backlit susuki (Japanese pampas grass) plumes and long blades rising into the frame (sway).
+Canvases are W + 2 * margin wide (frame x at mid-shot + margin), H tall; each element carries its
+inverse depth (Canvas zmode) for the truck warp."""
+import math
+import numpy as np
+import cv2
+from PIL import Image, ImageDraw, ImageFont
+
+from lib import core as C
+import s06_seaside_paint as P
+import s06_seaside_foliage as FO
+import s06_seaside_leaf as LF
+
+FONT = 'C:/Windows/Fonts/YuGothB.ttc'
+Z_POLE = 5.4
+Z_GRASS = 3.9
+Z_BUSH = 9.0
+
+
+def cc(h):
+    return C.hex2rgb(h)
+
+
+def text_mask(text, size_px, vertical=True, font=FONT, spacing=1.05):
+    """Anti-aliased text coverage (float32 0..1) rendered with a real Japanese font."""
+    size_px = max(int(round(size_px)), 6)
+    ss = 3
+    fnt = ImageFont.truetype(font, size_px * ss, index=0)
+    if vertical:
+        cw = int(size_px * ss * 1.1)
+        step = int(size_px * ss * spacing)
+        img = Image.new('L', (cw, step * len(text) + size_px * ss // 4), 0)
+        d = ImageDraw.Draw(img)
+        for i, ch in enumerate(text):
+            bb = d.textbbox((0, 0), ch, font=fnt)
+            w = bb[2] - bb[0]
+            h = bb[3] - bb[1]
+            x = (cw - w) / 2 - bb[0]
+            y = i * step + (step - h) / 2 - bb[1]
+            d.text((x, y), ch, font=fnt, fill=255)
+    else:
+        d0 = ImageDraw.Draw(Image.new('L', (4, 4)))
+        bb = d0.textbbox((0, 0), text, font=fnt)
+        img = Image.new('L', (bb[2] - bb[0] + 8, bb[3] - bb[1] + 8), 0)
+        d = ImageDraw.Draw(img)
+        d.text((4 - bb[0], 4 - bb[1]), text, font=fnt, fill=255)
+    a = np.asarray(img, np.float32) / 255.0
+    h, w = a.shape
+    return cv2.resize(a, (max(w // ss, 1), max(h // ss, 1)), interpolation=cv2.INTER_AREA)
+
+
+def stamp(cv, mask, x, y, color, alpha=1.0, anchor='c'):
+    """composite a coverage mask at (x, y) (anchor c = centre, t = top-centre)."""
+    h, w = mask.shape
+    x0 = int(round(x - w / 2))
+    y0 = int(round(y - (h / 2 if anchor == 'c' else 0)))
+    X0, Y0 = max(x0, 0), max(y0, 0)
+    X1, Y1 = min(x0 + w, cv.W), min(y0 + h, cv.H)
+    if X1 <= X0 or Y1 <= Y0:
+        return
+    m = mask[Y0 - y0:Y1 - y0, X0 - x0:X1 - x0]
+    cv.put((m, X0, Y0), color, alpha)
+
+
+class Near:
+    def __init__(self, sc):
+        self.sc = sc
+        W, H = sc.W, sc.H
+        self.u = W / 1920.0
+        self.mx = int(0.2 * W)
+        self.cw, self.ch = W + 2 * self.mx, H
+        self.hz = sc.HZ * H             # horizon row in frame px
+        self.f = sc.f
+        self.hc = sc.hc
+
+    def X(self, fx):
+        return self.mx + fx * self.sc.W
+
+    def yof(self, Y, Z):
+        return self.hz + self.f * (self.hc - Y) / Z
+
+    def build(self):
+        back = P.Canvas(self.cw, self.ch)
+        front = P.Canvas(self.cw, self.ch)
+        wgt = P.Canvas(self.cw, self.ch)
+        self._bush(back)
+        self._pole(back)
+        self._fence(back)
+        self._pampas(front, wgt)
+        w = wgt.straight()
+        return dict(back=back.straight(), front=front.straight(), front_w=w[..., 0] * w[..., 3],
+                    iz_back=back.iz_field(25.0, fill=1.0 / Z_POLE), iz_front=1.0 / Z_GRASS)
+
+    # ------------------------------------------------------------------ bottom-left bush + weeds
+    def _bush(self, cv):
+        W, H = self.sc.W, self.sc.H
+        u = self.u
+        rng = np.random.default_rng(401)
+        cv.zmode = ('c', 1.0 / Z_BUSH)
+        pal = dict(deep=cc('#070d15'), shd=cc('#0e1824'), sky=cc('#1d3040'), lit=cc('#5a4632'),
+                   hot=cc('#c47a4c'), rim=np.array([1.3, 0.72, 0.4], np.float32))
+        LF.clump(cv, self.X(-0.03), 1.0 * H, 0.14 * W, rng, pal, L=(1.0, -0.5), lz=-0.15, flat=0.7, leaf=0.085,
+                unit=u, rim=1.0, lit_bias=-0.05)
+        LF.clump(cv, self.X(0.105), 1.05 * H, 0.075 * W, rng, pal, L=(1.0, -0.5), lz=-0.15, flat=0.7, leaf=0.1,
+                unit=u, rim=1.0)
+        dark = cc('#101824')
+        rim = cc('#ffab66')
+        for k in range(30):
+            P.grass_tuft(cv, self.X(rng.uniform(-0.06, 0.2)), rng.uniform(0.95, 1.06) * H,
+                         H * rng.uniform(0.07, 0.18), rng, dark, rim, lean=0.2, n=8, rim_amt=0.7)
+
+    # ------------------------------------------------------------------ utility pole
+    def _pole(self, cv):
+        sc = self.sc
+        W, H = sc.W, sc.H
+        u = self.u
+        f, Z = self.f, Z_POLE
+        cv.zmode = ('c', 1.0 / Z)
+        xc = self.X(0.905)
+        y_top, y_bot = -0.05 * H, 1.05 * H
+        Ybot = self.hc - (y_bot - self.hz) * Z / f
+        Ytop = self.hc - (y_top - self.hz) * Z / f
+        rb, rt = 0.165, 0.165 - 0.0075 * (Ytop - Ybot) / 1.0 * 0.12     # gentle taper
+        wb, wt = f * rb / Z, f * rt / Z
+        pts = [(xc - wb, y_bot), (xc - wt, y_top), (xc + wt, y_top), (xc + wb, y_bot)]
+        r = cv.poly_mask(pts, ss=4)
+        m, x0, y0 = r
+        h, w = m.shape
+        gx, gy = cv.grid(x0, y0, w, h)
+        vy = np.clip((y_bot - gy) / (y_bot - y_top), 0, 1)
+        hw = wb + (wt - wb) * vy
+        nn = np.clip((gx - xc) / hw, -1, 1)
+        # backlit concrete: cool body, a warm rim on the sun side (left: the sun is left of the pole)
+        body = C.lerp(cc('#2a2c48'), cc('#3a3656'), C.smoothstep(-0.9, 0.4, -nn)[..., None])
+        body = C.lerp(body, cc('#1c1e34'), C.smoothstep(0.3, 1.0, nn)[..., None])
+        # subtle vertical gradient: sky-lit and a touch warmer high up, darker toward the ground
+        vg = C.smoothstep(0.0, 1.0, vy)[..., None]
+        body = body * (0.86 + 0.2 * vg) + cc('#3a2c40') * (0.06 * (1 - vg))
+        # concrete: broad mottling + fine pitting + a few vertical grime / rain streaks
+        tex = C.fbm(w, h, 6, 4, seed=402)
+        fine = C.fbm(w, h, max(int(w / (5.0 * u)), 4), 2, seed=405)
+        body = body * (0.93 + 0.12 * tex[..., None]) * (0.95 + 0.1 * fine[..., None])
+        rs = np.random.default_rng(406)
+        streak = np.zeros((h, w), np.float32)
+        for _ in range(9):
+            sx_ = rs.uniform(0.08, 0.92) * w
+            sy0 = rs.uniform(0.0, 0.7) * h
+            ln = rs.uniform(0.08, 0.35) * h
+            sw = rs.uniform(1.5, 5.0) * u
+            fall = np.clip((gy - y0 - sy0) / ln, 0, 1)
+            streak += np.exp(-((gx - x0 - sx_ - 3 * u * np.sin((gy - y0) / (40 * u))) / sw) ** 2) *                 (gy - y0 > sy0) * (1 - fall) ** 1.5 * rs.uniform(0.4, 1.0)
+        body = body * (1 - 0.22 * np.clip(streak, 0, 1)[..., None])
+        # a strong warm rim on the sun-facing (left) edge, with a wider warm falloff across the curve
+        rimw = 5.5 * u / hw
+        rim = np.clip(1 - (nn + 1) / (rimw * 2.0), 0, 1)
+        glow = np.clip(1 - (nn + 1) / 0.45, 0, 1)
+        body = body + cc('#ff9a66') * (glow ** 1.4 * 0.55)[..., None]
+        body = body + (np.array([1.7, 0.95, 0.5], np.float32) - body) * (rim ** 1.2 * 0.95)[..., None]
+        # cool sky bounce on the far edge
+        body = body + cc('#5a5aa0') * (C.smoothstep(0.75, 1.0, nn) * 0.12)[..., None]
+        # pole number plate seams / horizontal rings
+        cv.put(r, body)
+        self.pole = (xc, wb, wt, y_top, y_bot)
+
+        def px(Y):
+            return self.yof(Y, Z)
+
+        def half(yy):
+            vv = np.clip((y_bot - yy) / (y_bot - y_top), 0, 1)
+            return wb + (wt - wb) * vv
+        # step bolts (alternating sides): they pierce the pole a little in front of its silhouette, with a
+        # nut on the surface and a soft cast shadow below the bolt on the concrete
+        for k in range(14):
+            Y = Ybot + 0.35 + k * 0.45
+            yy = px(Y)
+            if yy < y_top or yy > y_bot:
+                continue
+            side = -1 if k % 2 == 0 else 1
+            hwk = half(yy)
+            L = f * 0.2 / Z
+            th = max(f * 0.022 / Z, 1.0)
+            xs0 = xc + side * hwk * 0.72
+            # cast shadow on the pole (down and away from the sun)
+            cv.line([(xs0 + side * th, yy + th * 1.3), (xc + side * hwk, yy + th * 1.7)], th * 1.1, cc('#12121e'), 0.55)
+            cv.line([(xs0, yy), (xc + side * (hwk + L), yy)], th, cc('#26243c'))
+            cv.line([(xc + side * (hwk + L), yy - th * 0.5), (xc + side * (hwk + L), yy - th * 1.6)], th * 0.8,
+                    cc('#26243c'))
+            # nut where the bolt enters the concrete
+            cv.poly([(xs0 - th * 0.9, yy - th * 1.1), (xs0 + th * 0.9, yy - th * 1.1), (xs0 + th * 0.9, yy + th * 1.1),
+                     (xs0 - th * 0.9, yy + th * 1.1)], cc('#1c1a2c'))
+            if side < 0:
+                cv.line([(xc + side * (hwk * 0.9), yy - th * 0.45), (xc + side * (hwk + L), yy - th * 0.45)],
+                        th * 0.35, cc('#ffb27a'), 0.9)
+                cv.line([(xs0 - th * 0.9, yy - th * 1.1), (xs0 - th * 0.9, yy + th * 1.1)], th * 0.3, cc('#ff9e70'),
+                        0.7)
+        # small pole ID plate + two weathered stickers (in shade) - real Japanese text
+        yy = px(6.3)
+        hwk = half(yy)
+        pw_, ph_ = hwk * 0.42, f * 0.2 / Z
+        xp = xc - hwk * 0.28
+        cv.poly([(xp - pw_, yy), (xp + pw_, yy), (xp + pw_, yy + ph_), (xp - pw_, yy + ph_)], cc('#aaa6b4') * 0.5)
+        m = text_mask('汐見', min(ph_ * 0.3, pw_ * 0.8), vertical=False)
+        stamp(cv, m, xp, yy + ph_ * 0.3, cc('#18203a'))
+        m = text_mask('15', min(ph_ * 0.3, pw_ * 0.8), vertical=False)
+        stamp(cv, m, xp, yy + ph_ * 0.72, cc('#18203a'))
+        cv.line([(xp - pw_, yy), (xp - pw_, yy + ph_)], 1.3 * u, np.array([1.3, 0.75, 0.45], np.float32), 0.8)
+        cv.line([(xp - pw_, yy), (xp + pw_, yy)], 1.0 * u, cc('#8a7a88'), 0.7)
+        yy = px(5.9)
+        hwk = half(yy)
+        sh_ = f * 0.08 / Z
+        cv.poly([(xc + hwk * 0.15, yy), (xc + hwk * 0.55, yy + 2 * u), (xc + hwk * 0.53, yy + sh_),
+                 (xc + hwk * 0.13, yy + sh_ - 2 * u)], cc('#a88a48') * 0.4, 0.85)
+        yy = px(6.7)
+        cv.poly([(xc - hwk * 0.1, yy), (xc + hwk * 0.3, yy - 1 * u), (xc + hwk * 0.3, yy + sh_ * 0.8),
+                 (xc - hwk * 0.1, yy + sh_ * 0.8)], cc('#a04a50') * 0.35, 0.7)
+        # band clamps
+        for Y in (5.35, 5.6):
+            yy = px(Y)
+            hwk = half(yy)
+            cv.poly([(xc - hwk - 2 * u, yy - 5 * u), (xc + hwk + 2 * u, yy - 5 * u), (xc + hwk + 2 * u, yy + 5 * u),
+                     (xc - hwk - 2 * u, yy + 5 * u)], cc('#34324c'))
+            cv.line([(xc - hwk - 2 * u, yy - 5 * u), (xc - hwk * 0.2, yy - 5 * u)], 1.2 * u, cc('#ffb27a'), 0.8)
+        # street-lamp arm: curved pipe from the clamp up and out to the left, LED head at the end
+        y0a = px(5.6)
+        tt = np.linspace(0, 1, 40)
+        axs = xc - half(y0a) - tt * f * 1.35 / Z
+        ays = y0a - (1 - (1 - tt) ** 2) * f * 0.55 / Z
+        thk = f * 0.045 / Z
+        cv.line(np.stack([axs, ays], 1), thk, cc('#2a2842'))
+        cv.line(np.stack([axs, ays - thk * 0.35], 1), max(thk * 0.22, 1.0), cc('#ffb27a'), 0.85)
+        hx, hy = axs[-1], ays[-1]
+        hl = f * 0.42 / Z
+        head = [(hx + hl * 0.1, hy - thk * 0.8), (hx - hl, hy - thk * 0.3), (hx - hl * 1.05, hy + thk * 0.9),
+                (hx + hl * 0.05, hy + thk * 1.1)]
+        cv.poly(head, cc('#302c46'))
+        cv.line([(hx + hl * 0.1, hy - thk * 0.8), (hx - hl, hy - thk * 0.3)], 1.4 * u, cc('#ffc088'), 0.9)
+        # lamp lens (lit, warm) on the underside
+        cv.poly([(hx - hl * 0.85, hy + thk * 0.95), (hx - hl * 0.15, hy + thk * 1.05), (hx - hl * 0.15, hy + thk * 1.35),
+                 (hx - hl * 0.85, hy + thk * 1.25)], np.array([1.3, 1.05, 0.72], np.float32))
+        self.lamp = (hx - hl * 0.5, hy + thk * 1.2)
+        # drop cable: from the pole, sagging to the left, leaving through the top of the frame
+        y1c = px(5.95)
+        cx0 = xc - half(y1c)
+        ex, ey = self.X(0.47), -0.08 * H
+        tt = np.linspace(0, 1, 120)
+        cxs = cx0 + (ex - cx0) * tt
+        cys = y1c + (ey - y1c) * tt + 0.16 * H * 4 * tt * (1 - tt)
+        cv.line(np.stack([cxs, cys], 1), max(2.2 * u, 1.0), cc('#1e1c30'))
+        cv.line(np.stack([cxs, cys - 1.0 * u], 1), max(0.7 * u, 0.5), cc('#ff9e70'), 0.6)
+        # second, thinner cable (telecom) with a small closure box
+        cys2 = y1c + 0.05 * H + (ey + 0.02 * H - y1c - 0.05 * H) * tt + 0.19 * H * 4 * tt * (1 - tt)
+        cxs2 = cx0 + (self.X(0.5) - cx0) * tt
+        cv.line(np.stack([cxs2, cys2], 1), max(1.6 * u, 0.8), cc('#1e1c30'))
+        k = 22
+        bx_, by_ = cxs2[k], cys2[k]
+        cv.poly([(bx_ - 14 * u, by_ - 7 * u), (bx_ + 14 * u, by_ - 9 * u), (bx_ + 14 * u, by_ + 9 * u),
+                 (bx_ - 14 * u, by_ + 11 * u)], cc('#2c2a44'))
+        cv.line([(bx_ - 14 * u, by_ - 7 * u), (bx_ + 14 * u, by_ - 9 * u)], 1.2 * u, cc('#ffb27a'), 0.7)
+        # ---- pole advert (white plate, blue band) and address plate: real Japanese text
+        self._plate(cv, xc, half, px, 5.15, 4.05, cc('#d8d4dc'), [
+            ('band', cc('#2a5aa8'), 0.0, 0.2),
+            ('text', '海辺食堂', cc('#1e2a4a'), 0.24, 0.8),
+            ('text', 'この先すぐ', cc('#b83838'), 0.8, 0.99),
+        ])
+        self._plate(cv, xc, half, px, 3.8, 3.2, cc('#2a5aa8'), [
+            ('text', '汐見町二丁目', cc('#eef0f6'), 0.04, 0.99),
+        ])
+
+    def _plate(self, cv, xc, half, px, Ytop, Ybot, base, items):
+        u = self.u
+        yt, yb = px(Ytop), px(Ybot)
+        hw = half(yt) * 0.92
+        cv_rect = [(xc - hw, yt), (xc + hw, yt), (xc + hw, yb), (xc - hw, yb)]
+        # the plate is in shadow (backlit): tone everything down, faint warm bounce from the road
+        shade = 0.46
+        cv.poly(cv_rect, base * shade)
+        for it in items:
+            if it[0] == 'band':
+                _, c, a, b = it
+                cv.poly([(xc - hw, yt + (yb - yt) * a), (xc + hw, yt + (yb - yt) * a),
+                         (xc + hw, yt + (yb - yt) * b), (xc - hw, yt + (yb - yt) * b)], c * shade)
+                m = text_mask('食事処', hw * 0.5, vertical=False)
+                stamp(cv, m, xc, yt + (yb - yt) * (a + b) / 2, cc('#f0f0f4') * shade)
+            else:
+                _, txt, c, a, b = it
+                span = (yb - yt) * (b - a)
+                size = min(span / (len(txt) * 1.05), hw * 1.5)
+                m = text_mask(txt, size, vertical=True)
+                stamp(cv, m, xc, yt + (yb - yt) * a, c * (shade + 0.08), anchor='t')
+        # frame edge + warm rim on the sun-side edge
+        cv.line([(xc - hw, yt), (xc - hw, yb)], 1.6 * u, np.array([1.2, 0.68, 0.4], np.float32), 0.9)
+        cv.line([(xc - hw, yt), (xc + hw, yt)], 1.2 * u, cc('#b08070'), 0.8)
+        # mounting bands
+        for yy in (yt + 4 * u, yb - 4 * u):
+            cv.line([(xc - half(yy) - 2 * u, yy), (xc + half(yy) + 2 * u, yy)], 2.2 * u, cc('#3a3852'))
+
+    # ------------------------------------------------------------------ pipe fence (bottom right)
+    def _fence(self, cv):
+        W, H = self.sc.W, self.sc.H
+        u = self.u
+        cv.zmode = ('c', 1.0 / Z_POLE)
+        xa, xb = self.X(0.5), self.X(1.22)
+        ya, yb = 0.905 * H, 0.94 * H
+        d2 = 0.065 * H
+        th = 0.016 * H
+
+        def ry(x, off=0.0):
+            return ya + (yb - ya) * (x - xa) / (xb - xa) + off
+        # posts
+        for x in np.arange(xa, xb, 0.13 * W):
+            pw = 0.0065 * H
+            cv.poly([(x - pw, ry(x) - th * 0.3), (x + pw, ry(x) - th * 0.3), (x + pw, H * 1.05), (x - pw, H * 1.05)],
+                    cc('#2e2e48'))
+            cv.line([(x - pw * 0.7, ry(x)), (x - pw * 0.7, H * 1.05)], max(1.3 * u, 0.8), cc('#ffb27a'), 0.7)
+            cv.poly([(x - pw * 1.5, ry(x) - th * 0.8), (x + pw * 1.5, ry(x) - th * 0.8), (x + pw * 1.5, ry(x) + th * 0.2),
+                     (x - pw * 1.5, ry(x) + th * 0.2)], cc('#34344e'))
+        # rails (galvanised pipes): cool body, hot top highlight where the low sun grazes them
+        for off, tk in ((0.0, th), (d2, th * 0.8)):
+            xs = np.linspace(xa - 0.01 * W, xb, 60)
+            top = np.stack([xs, ry(xs, off) - tk / 2], 1)
+            bot = np.stack([xs, ry(xs, off) + tk / 2], 1)[::-1]
+            cv.poly(np.concatenate([top, bot]), cc('#3c3e5c'))
+            cv.poly(np.concatenate([np.stack([xs, ry(xs, off) + tk * 0.05], 1),
+                                    np.stack([xs, ry(xs, off) + tk / 2], 1)[::-1]]), cc('#272844'))
+            # highlight: brighter toward the sun (x ~ 0.655 W)
+            hot = np.exp(-((xs - self.X(0.66)) / (0.25 * W)) ** 2)
+            for i in range(len(xs) - 1):
+                a = 0.45 + 0.55 * hot[i]
+                cv.line([(xs[i], ry(xs[i], off) - tk * 0.3), (xs[i + 1], ry(xs[i + 1], off) - tk * 0.3)],
+                        max(tk * 0.22, 1.0), np.array([1.25, 0.82, 0.5], np.float32) * a, 0.95)
+        self.fence_glint = (self.X(0.66), ry(self.X(0.66)) - th * 0.3)
+
+    # ------------------------------------------------------------------ pampas grass (front)
+    def _pampas(self, cv, wcv):
+        W, H = self.sc.W, self.sc.H
+        u = self.u
+        rng = np.random.default_rng(405)
+        cv.zmode = ('c', 1.0 / Z_GRASS)
+        stem = cc('#2a2438')
+        plume = np.array([1.08, 0.8, 0.56], np.float32)
+        blade = cc('#1a1a2c')
+        rim = cc('#ffb070')
+        clumps = [(0.69, 0.4), (0.78, 0.36), (0.84, 0.47), (0.99, 0.44), (1.07, 0.5), (1.14, 0.4),
+                  (0.19, 0.28), (-0.1, 0.36)]
+        for (fx, hh) in clumps:
+            bx = self.X(fx)
+            by = 1.08 * H
+            # long leaves first
+            P.grass_tuft(cv, bx, by, hh * 0.55 * H, rng, blade, rim, lean=0.25, n=10, width=0.45, wcv=wcv,
+                         rim_amt=0.8)
+            for k in range(int(rng.integers(3, 6))):
+                h = hh * H * rng.uniform(0.7, 1.05)
+                hot = 1.0 + 0.3 * math.exp(-((fx - 0.66) / 0.18) ** 2)
+                P.susuki(cv, bx + rng.normal(0, 0.012 * W), by, h, rng, stem, plume * rng.uniform(0.85, 1.05) * hot,
+                         lean=rng.uniform(-0.05, 0.25), wcv=wcv)
