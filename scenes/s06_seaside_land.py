@@ -10,6 +10,12 @@ from lib import core as C
 import s06_seaside_paint as P
 import s06_seaside_foliage as FO
 import s06_seaside_leaf as LF
+import s06_seaside_tree as TR
+import s06_seaside_tree2 as T2
+import s06_seaside_tree3 as T3
+import s06_seaside_tree4 as T4
+import s06_seaside_tree5 as T5
+import s06_seaside_tree6 as T6
 
 HALF = 3.3          # half road width incl. shoulders (m)
 RAIL = HALF + 0.3   # guardrail lateral offset
@@ -97,12 +103,17 @@ class Land:
         self._street_furniture(self.rail)
         self._rail(self.rail)
         self.hill = canvas()
+        self.tree = canvas()        # the big hillside crown (own plate: it sways)
+        self.tw = P.Canvas(pw, ph)          # its sway weights
         self._hill(self.hill)
         self.poles = canvas()
         self._poles(self.poles)
         gw = self.gw.straight()
         return dict(road=self.road.straight(), grass=self.grass.straight(), grass_w=gw[..., 0] * gw[..., 3],
                     rail=self.rail.straight(), hill=self.hill.straight(), poles=self.poles.straight(),
+                    tree=self.tree.straight(),
+                    tree_w=np.dstack([self.tw.straight()[..., 3], self.tw.straight()[..., 0]]).astype(np.float32),
+                    iz_tree=self.tree.iz_field(10.0),
                     iz_road=self.road.iz_field(1.0), iz_grass=self.grass.iz_field(6.0),
                     iz_rail=self.rail.iz_field(2.0), iz_hill=self.hill.iz_field(10.0),
                     iz_poles=self.poles.iz_field(1.5))
@@ -120,7 +131,23 @@ class Land:
         X, Z, nx, nz = self.at(ss)
         bx, by = self.sc.proj(X + nx * edge, 0.1, Z + nz * edge)
         pts = list(zip(ax, ay)) + list(zip(bx[::-1], by[::-1]))
-        cv.poly(pts, cc('#3e3a5c'))
+        res = cv.poly_mask(pts, ss=3)
+        if res is None:
+            return
+        m, x0, y0 = res
+        h, w = m.shape
+        # dark backlit verge: grass texture in cool shade, a warm lip along the cliff edge toward the sun path
+        n1 = C.fbm(w, h, max(w / (40 * self.u), 3), 4, seed=33)
+        n2 = C.fbm(w, h, max(w / (8 * self.u), 3), 2, seed=34)
+        col = cc('#27233c') * (0.8 + 0.4 * n1[..., None]) * (0.92 + 0.16 * n2[..., None])
+        xs, ys = cv.grid(x0, y0, w, h)
+        ks = np.exp(-((xs - self.sc.sun_p[0]) / (0.25 * self.sc.W)) ** 2)
+        # outer edge: a thin band just inside the far polygon edge
+        mb = cv2.erode((m > 0.5).astype(np.uint8), np.ones((3, 3), np.uint8), iterations=max(int(2 * self.u), 1))
+        lip = np.clip(m - cv2.GaussianBlur(mb.astype(np.float32), (0, 0), 1.5 * self.u), 0, 1)
+        lip = lip * (ys < np.interp(xs, bx, by) + 4 * self.u) * C.smoothstep(0.45, 0.6, n2)
+        col = col + (np.array([1.5, 0.85, 0.45], np.float32) - col) * (lip * ks * 0.8)[..., None]
+        cv.put(res, col)
 
     # ---------------------------------------------------------------- road surface (per pixel)
     def _road_surface(self, cv):
@@ -159,7 +186,7 @@ class Land:
             return a - b
 
         # ---- asphalt base: lit warm mauve, sheen toward the far distance
-        lit = cc('#8e6476')
+        lit = cc('#9a6a6c')
         # grain / patches in world coords, faded with footprint (no aliasing)
         rng = np.random.default_rng(11)
         tex = C.fbm(512, 512, 24, 4, seed=21)
@@ -193,6 +220,32 @@ class Land:
         # tyre-polished tracks slightly darker/glossier
         tr = sum(band(lat, c, 0.45, fpl) for c in (-2.3, -0.9, 0.9, 2.3))
         shade = shade * (1 - 0.07 * tr)
+        # oil drip strip down the middle of each lane, pale dust along the kerbs
+        oil = sum(band(lat, c, 0.3, fpl) for c in (-1.6, 1.6)) * (0.6 + 0.8 * g2)
+        shade = shade * (1 - 0.09 * oil)
+        dust = C.smoothstep(HALF - 0.9, HALF - 0.15, np.abs(lat)) * (0.5 + 0.5 * g2)
+        shade = shade * (1 + 0.1 * dust)
+        # fine sealed cracks (tar snakes, 48 px per metre, tiles every ~21 m): dark, glossy
+        ct2 = np.zeros((1024, 1024), np.uint8)
+        for k in range(70):
+            p0 = crng.uniform(0, 1024, 2)
+            ang = crng.uniform(0, 2 * np.pi)
+            stack = [(p0, ang, int(crng.integers(6, 18)))]
+            while stack:
+                q, a_, n_ = stack.pop()
+                pts = [q]
+                for j in range(n_):
+                    a_ += crng.normal(0, 0.45)
+                    pts.append(pts[-1] + np.array([np.cos(a_), np.sin(a_)]) * crng.uniform(5, 16))
+                    if crng.random() < 0.08 and len(stack) < 6:
+                        stack.append((pts[-1], a_ + crng.choice([-1, 1]) * crng.uniform(0.6, 1.3), n_ // 2))
+                cv2.polylines(ct2, [np.array(pts, np.int32)], False, 255, int(crng.integers(1, 3)), cv2.LINE_AA)
+        ct2 = cv2.GaussianBlur(ct2.astype(np.float32) / 255.0, (0, 0), 0.5)
+        cmap2 = cv2.remap(ct2, ((lat * 48.0) % 1024).astype(np.float32), ((cs * 48.0) % 1024).astype(np.float32),
+                          cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+        fade2 = np.clip(1.6 - fp * 60, 0, 1)
+        cmap2 = cmap2 * fade2 * (1 - 0.8 * C.smoothstep(HALF - 0.6, HALF, np.abs(lat)))
+        shade = shade * (1 - 0.3 * cmap2)
         col = lit * shade[..., None]
         # far sheen (grazing reflection of the bright sky)
         refl = sc.refl[y0:y0 + h, x0:x0 + w]
@@ -210,10 +263,23 @@ class Land:
         near_sh = np.clip(C.blur(shm, 4.0 * self.u) * 1.6, 0, 1) * (1 - shm)     # lit asphalt next to shadow
         sheen = (0.12 + 0.3 * near_sh) * side * ks * (1 - shm) * (0.4 + 0.6 * np.clip(1 - graz * 1.5, 0, 1))
         col = col + cc('#ffa860') * sheen[..., None] * shade[..., None]
+        # broad warm light pool on the open (sun-side, mid-distance) road vs a cool shade on the inner lane
+        # under the hill: a painted warm / cool split rather than uniform shading
+        pool = np.exp(-((xs - sunx * 0.85) / (0.42 * W)) ** 2) * C.smoothstep(-2.5, 1.0, lat) * (1 - shm)
+        pool = pool * C.smoothstep(sc.hzp + 0.02 * H, sc.hzp + 0.12 * H, ys)
+        col = col * (1 + np.array([0.2, 0.07, -0.06], np.float32) * pool[..., None])
+        inner = C.smoothstep(-0.8, -HALF + 0.2, lat)
+        col = col * (1 - np.array([0.16, 0.12, 0.0], np.float32) * inner[..., None])
         fine = cv2.remap(C.fbm(512, 512, 70, 2, seed=23), ((lat * 30.0) % 512).astype(np.float32),
                          ((cs * 30.0) % 512).astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
         spk = C.smoothstep(0.76, 0.86, fine) * np.clip(1 - fp * 30, 0, 1) * (1 - shm) * ks * side
         col = col + np.array([1.4, 0.95, 0.55], np.float32) * (spk * (0.25 + 0.6 * near_sh))[..., None]
+        # the glossy tar in the cracks catches the low sun: broken warm specular threads toward the sun column
+        brk = C.smoothstep(0.45, 0.7, fine)
+        cspec = cmap2 * brk * (ks ** 2) * (1 - shm) * (0.3 + 0.7 * side)
+        ks2 = np.exp(-((xs - sunx) / (0.5 * W)) ** 2)
+        cspec = cmap2 * brk * ks2 * (1 - shm) * (0.4 + 0.6 * side)
+        col = col + np.array([1.8, 1.15, 0.62], np.float32) * (cspec * 1.1)[..., None]
         col = col * (1 - shm[..., None]) + shc * shm[..., None]
         # ---- markings (worn white, lit warm / cool in shadow)
         e = band(lat, HALF - 0.45, 0.075, fpl) + band(lat, -(HALF - 0.45), 0.075, fpl)
@@ -224,6 +290,10 @@ class Land:
         wl = cc('#fff0e0') * (1 - shm[..., None]) + cc('#b8b4e6') * shm[..., None]
         wl = wl * (1 - 0.35 * graz[..., None]) + refl * 0.35 * graz[..., None]
         col = col * (1 - mk[..., None] * 0.92) + wl * mk[..., None] * 0.92
+        # the sea-side edge line catches the low sun: broken warm specular glints on the lit stretches
+        eln = band(lat, HALF - 0.45, 0.075, fpl) * wear
+        gb = C.smoothstep(0.55, 0.7, fine) * (1 - shm) * ks2
+        col = col + np.array([2.0, 1.35, 0.75], np.float32) * (eln * gb * 0.9)[..., None]
         cv.put((m, x0, y0), col)
         self.road_px = (x0, y0, w, h)
 
@@ -284,15 +354,55 @@ class Land:
             if hw > 0.8:
                 cv.poly([(x + hw * 0.35, y0), (x + hw, y0), (x + hw, y1), (x + hw * 0.35, y1)], post_lit * 0.8, 0.7)
         # beam: W-profile stripes (heights, colour)
-        stripes = [(0.46, 0.52, '#8c87b4'), (0.52, 0.6, '#b3aed2'), (0.6, 0.665, '#7e79a6'),
-                   (0.665, 0.74, '#c4bfe0'), (0.74, 0.8, '#9d98c2')]
+        stripes = [(0.46, 0.52, '#6e6a9a'), (0.52, 0.6, '#9a94c0'), (0.6, 0.665, '#625e8e'),
+                   (0.665, 0.74, '#aca6d0'), (0.74, 0.8, '#7e79a8')]
         for h0, h1, c in stripes:
             cv.zmode = ('Y', 0.5 * (h0 + h1))
             cv.poly(self.strip(0.3, s1, RAIL, h0, RAIL, h1, n=1400), cc(c))
+        # wear: road grime splashed on the lower flute (patchy), rust bleeding from the post bolts,
+        # a dull dent here and there
+        wrng = np.random.default_rng(8)
+        cv.zmode = ('Y', 0.5)
+        for s0 in np.arange(0.3, min(s1, 120.0), 1.3):
+            s1_ = s0 + wrng.uniform(0.6, 1.4)
+            if self.zof(s0, RAIL) < 2.0:
+                continue
+            cv.poly(self.strip(s0, s1_, RAIL, 0.46, RAIL, 0.46 + wrng.uniform(0.04, 0.12), n=8), cc('#4a4058'),
+                    alpha=wrng.uniform(0.15, 0.5))
+        for sp in np.arange(2.0, min(s1, 90.0), 4.0):
+            if self.zof(sp, RAIL) < 2.0:
+                continue
+            cv.zmode = ('Y', 0.6)
+            for k in range(int(wrng.integers(1, 3))):
+                o = wrng.uniform(-0.12, 0.12)
+                ln = wrng.uniform(0.08, 0.2)
+                cv.poly(self.strip(sp + o, sp + o + wrng.uniform(0.02, 0.05), RAIL, 0.65 - ln, RAIL, 0.66, n=4),
+                        cc('#9a5a40'), alpha=wrng.uniform(0.35, 0.7))
+            # bolt heads on the beam
+            cv.poly(self.strip(sp - 0.03, sp + 0.03, RAIL, 0.625, RAIL, 0.655, n=4), cc('#4c4466'), alpha=0.9)
+            if wrng.random() < 0.25:
+                d0 = sp + wrng.uniform(0.8, 2.8)
+                cv.zmode = ('Y', 0.7)
+                cv.poly(self.strip(d0, d0 + wrng.uniform(0.3, 0.6), RAIL, 0.68, RAIL, 0.75, n=6), cc('#6c6590'),
+                        alpha=0.45)
+        # warm sheen on the convex upper flute where it faces the sun (broken by the dents / grime)
+        sx_, sy_ = sc.sun_p
+        ss_ = np.linspace(0.3, s1, 700)
+        px_, py_ = self.P(ss_, RAIL, 0.7)
+        k_ = np.exp(-((px_ - sx_) / (0.3 * sc.W)) ** 2)
+        zz_ = self.zof(ss_, RAIL)
+        for a in range(0, len(ss_) - 1, 5):
+            b = min(a + 6, len(ss_))
+            ka = float(k_[a:b].mean()) * wrng.uniform(0.4, 1.0)
+            if ka < 0.03 or zz_[a] < 1.5:
+                continue
+            cv.zmode = ('c', 1.0 / zz_[a:b].mean())
+            wd = max(sc.f * 0.02 / zz_[a:b].mean(), 0.5 * self.u)
+            cv.line(np.stack([px_[a:b], py_[a:b]], 1), wd, cc('#ffcf96'), alpha=min(ka * 0.8, 0.8))
         # hot top edge where the low sun grazes the rail
         cv.zmode = ('Y', 0.8)
         top = self.strip(0.3, s1, RAIL, 0.79, RAIL, 0.815, n=1400)
-        cv.poly(top, cc('#ffd9a0'))
+        cv.poly(top, cc('#c8b0c0'))
         # HDR specular sheen along the top edge where it lines up with the sun (+ glint anchors)
         sx_, sy_ = sc.sun_p
         ss_ = np.linspace(0.3, s1, 700)
@@ -307,7 +417,33 @@ class Land:
                 continue
             cv.zmode = ('c', 1.0 / zz_[a:b].mean())
             wd = max(sc.f * 0.012 / zz_[a:b].mean(), 0.6 * self.u)
-            cv.line(np.stack([px_[a:b], py_[a:b]], 1), wd, hot, alpha=min(ka * 1.2, 1.0))
+            cv.line(np.stack([px_[a:b], py_[a:b]], 1), wd, hot, alpha=min(ka * 0.35, 0.4))
+        # cool sky reflected in the lower flute + a thin dark shadow line under the beam
+        cv.zmode = ('Y', 0.49)
+        cv.poly(self.strip(0.3, s1, RAIL, 0.46, RAIL, 0.53, n=1400), cc('#6a74cc'), alpha=0.75)
+        cv.poly(self.strip(0.3, s1, RAIL, 0.44, RAIL, 0.465, n=1400), cc('#2c2848'), alpha=0.8)
+        # hot glint streak on the sun-facing top edge, broken at every post (the beam joints)
+        ss_ = np.linspace(0.3, s1, 2400)
+        px_, py_ = self.P(ss_, RAIL, 0.808)
+        zz_ = self.zof(ss_, RAIL)
+        k_ = 0.3 * np.exp(-((px_ - sx_) / (0.6 * sc.W)) ** 2) + 0.7 * np.exp(-((px_ - sx_) / (0.25 * sc.W)) ** 2)
+        gap = np.abs((ss_ % 4.0) - 2.0) < 0.45
+        hot2 = np.array([1.6, 0.82, 0.36], np.float32)
+        a = 0
+        while a < len(ss_) - 1:
+            b = a
+            while b < len(ss_) - 1 and gap[b] == gap[a] and b - a < 8:
+                b += 1
+            if not gap[a] and zz_[a] > 1.2:
+                ka = float(k_[a:b + 1].mean())
+                if ka > 0.04:
+                    cv.zmode = ('c', 1.0 / zz_[a:b + 1].mean())
+                    wd = max(sc.f * 0.03 / zz_[a:b + 1].mean(), 0.9 * self.u)
+                    cv.line(np.stack([px_[a:b + 1], py_[a:b + 1]], 1), wd, hot2, alpha=min(ka * 1.3, 1.0))
+                    if ka > 0.35:
+                        cv.line(np.stack([px_[a:b + 1], py_[a:b + 1] - wd * 0.15], 1), wd * 0.4,
+                                np.array([2.4, 1.5, 0.7], np.float32), alpha=min((ka - 0.35) * 1.6, 1.0))
+            a = b
         self.rail_glints = []
         rng = np.random.default_rng(5)
         for sp in np.arange(4.0, s1, 3.3):
@@ -354,7 +490,9 @@ class Land:
         tl = self.fr(-0.2, -0.1)
         poly = [tl] + [tuple(p) for p in rid] + [tuple(p) for p in edge[::-1]] + [bl]
         hm = cv.poly_mask(poly, ss=3)
-        cv.zmode = ('F', self._hill_depth())
+        hd = self._hill_depth()
+        cv.zmode = ('F', hd)
+        self.tree.zmode = ('F', hd)
         # base: shadowed undergrowth colour
         m, x0, y0 = hm
         cv.put(hm, cc('#1d3040'))
@@ -422,6 +560,23 @@ class Land:
         tex = cc('#2c3a36') * (0.72 + 0.55 * n1[..., None])
         tex = C.lerp(tex, cc('#3a4630'), (C.smoothstep(0.55, 0.8, n2) * 0.6)[..., None])
         self._clip_put(cv, r, tex, hm)
+        # per-cell value / hue variation: some cells sun-dried (olive-ochre), some lush, some bare and dark;
+        # each cell a touch lighter at its upper edge where the grass tips catch the sky
+        crng = np.random.default_rng(58)
+        tints = [cc('#5a5a2c'), cc('#3c5230'), cc('#1c2a26'), cc('#4a4a34'), cc('#2e4632')]
+        for sp in np.arange(0.5, self.SV + 5, 2.0):
+            for u0 in np.arange(0.0, UT - 0.01, 2.0):
+                X0, Y0, Z0 = self.lat_pt(np.array([sp, sp + 2.0, sp + 2.0, sp]), np.array([u0, u0, u0 + 2.0, u0 + 2.0]))
+                if Z0.min() < 1.5:
+                    continue
+                qx, qy = sc.proj(X0, Y0, Z0)
+                c_ = tints[int(crng.integers(0, len(tints)))]
+                self._clip_put(cv, cv.poly_mask(list(zip(qx, qy))), c_, hm, float(crng.uniform(0.3, 0.7)))
+                X1, Y1, Z1 = self.lat_pt(np.array([sp, sp + 2.0, sp + 2.0, sp]),
+                                         np.array([u0 + 1.4, u0 + 1.4, u0 + 2.0, u0 + 2.0]))
+                qx, qy = sc.proj(X1, Y1, Z1)
+                self._clip_put(cv, cv.poly_mask(list(zip(qx, qy))), cc('#6a6a48'), hm, float(crng.uniform(0.08, 0.2)))
+        self._cell_grass(cv, hm, UT)
         # shading: grass in cells lit warm, gets darker/cooler with distance
         # beams along the slope (constant u) and up the slope (constant s)
         beam_lit = cc('#8a7a9c')
@@ -429,6 +584,7 @@ class Land:
         bw = 0.35
         bm = np.zeros((cv.H, cv.W), np.float32)
         topm = np.zeros((cv.H, cv.W), np.float32)
+        hbm = np.zeros((cv.H, cv.W), np.float32)
 
         def acc(res, dst):
             if res is None:
@@ -444,7 +600,7 @@ class Land:
             bx, by = sc.proj(X1, Y1, Z1)
             ok = Z0 > 1.5
             pts = list(zip(ax[ok], ay[ok])) + list(zip(bx[ok][::-1], by[ok][::-1]))
-            self._clip_put(cv, acc(cv.poly_mask(pts), bm), beam_lit, hm)
+            self._clip_put(cv, acc(acc(cv.poly_mask(pts), bm), hbm), beam_lit, hm)
             # warm light catching the upper edge of the beam
             X3, Y3, Z3 = self.lat_pt(ss, u + bw * 0.8)
             ex_, ey_ = sc.proj(X3, Y3, Z3)
@@ -466,6 +622,7 @@ class Land:
                 bx, by = sc.proj(X1, Y1, Z1)
                 pts = list(zip(ax, ay)) + list(zip(bx[::-1], by[::-1]))
                 self._clip_put(cv, acc(cv.poly_mask(pts), bm), c, hm)
+        self.hbm = hbm
         self._lattice_finish(cv, bm, topm, r, hm)
         # gutter at the road edge
         g = self.strip(0.3, self.SV + 5, -HALF - 0.6, 0, -HALF, 0, n=300)
@@ -511,7 +668,24 @@ class Land:
         rng = np.random.default_rng(93)
         chips = (rng.random((h, w)) > 0.994).astype(np.float32)
         chips = cv2.GaussianBlur(chips, (0, 0), 0.8 * u) * 3.0
-        tex = (0.86 + 0.28 * n1) * (1 - 0.28 * stain) * (1 - 0.35 * np.clip(chips, 0, 1))
+        tex = (0.78 + 0.46 * n1) * (1 - 0.42 * stain) * (1 - 0.4 * np.clip(chips, 0, 1))
+        # vertical rain streaks running down from every beam (long, thin, darker) + pale lime bloom
+        rs = rng.standard_normal((h, w)).astype(np.float32)
+        rs = cv2.GaussianBlur(rs, (0, 0), sigmaX=1.1 * u, sigmaY=16 * u)
+        rs = rs / (rs.std() + 1e-6)
+        n3 = C.fbm(w, h, max(w / (90 * u), 3), 3, seed=95)
+        tex *= 1 - 0.22 * C.smoothstep(0.6, 1.8, rs) * C.smoothstep(0.35, 0.65, n3)
+        tex *= 1 + 0.14 * C.smoothstep(1.0, 2.2, -rs) * C.smoothstep(0.55, 0.75, n1)
+        # aggregate speckle (fine, static) and chipped arrises: dark notches along the beam edges
+        sp_ = rng.standard_normal((h, w)).astype(np.float32)
+        tex *= 1 + 0.05 * np.clip(cv2.GaussianBlur(sp_, (0, 0), 0.6 * u), -2, 2)
+        er = np.clip(B - cv2.erode(B, np.ones((3, 3), np.uint8)), 0, 1)
+        notch = C.smoothstep(0.62, 0.72, C.fbm(w, h, max(w / (8 * u), 4), 2, seed=96))
+        tex *= 1 - 0.4 * er * notch
+        # lichen / moss blotches, mostly on the lower beams
+        moss = C.smoothstep(0.6, 0.72, C.fbm(w, h, max(w / (25 * u), 4), 3, seed=97)) * \
+            np.clip((np.arange(h, dtype=np.float32)[:, None] / max(h, 1)) * 1.4 - 0.2, 0, 1)
+        rgb[:] = rgb + (C.hex2rgb('#4a5a3a') * 0.9 - rgb) * (moss * B * 0.45)[..., None]
         # moss / grime creeping up from the cells: greener-darker at the bottom edge of every beam
         und = np.clip(B - cv2.warpAffine(B, np.float32([[1, 0, 0], [0, 1, -3.5 * u]]), (w, h)), 0, 1)
         k = B[..., None]
@@ -524,7 +698,80 @@ class Land:
         rim = np.maximum(rim, topm[y0:y1, x0:x1] * clipf[y0:y1, x0:x1] * 0.35)
         rc = np.array([1.25, 0.72, 0.45], np.float32)
         rgb[:] = rgb + (rc - rgb) * (np.clip(rim, 0, 1) * 0.7)[..., None]
+        # --- water stains streaked down from every crossbar: a dark wash that starts under the bar and
+        # fades down the slope beams in thin vertical runs (plus pale lime-scale runs), on the concrete only
+        HB = self.hbm[y0:y1, x0:x1] * clipf[y0:y1, x0:x1]
+        dn = HB.copy()
+        stp = max(int(round(1.5 * u)), 1)
+        for _ in range(int(45 * u / stp)):
+            dn = np.maximum(dn, np.pad(dn, ((stp, 0), (0, 0)))[:h] * 0.965)
+        below = np.clip(dn - HB, 0, 1)
+        runs = rng.standard_normal((h, w)).astype(np.float32)
+        runs = cv2.GaussianBlur(runs, (0, 0), sigmaX=1.3 * u, sigmaY=22 * u)
+        runs = runs / (runs.std() + 1e-6)
+        wet = below * C.smoothstep(-0.2, 1.2, runs) * B
+        rgb *= (1 - 0.5 * wet)[..., None]
+        rgb[:] = rgb + (cc('#2c3440') * 0.8 - rgb) * (wet * 0.25)[..., None]
+        lime = below * C.smoothstep(1.3, 2.3, -runs) * B * 0.5
+        rgb[:] = rgb + (cc('#b8b0a4') - rgb) * lime[..., None] * 0.5
+        # rust-brown bleed right under each bar
+        und2 = np.clip(np.pad(HB, ((int(3 * u) + 1, 0), (0, 0)))[:h] - HB, 0, 1) * B
+        rgb[:] = rgb + (cc('#4a3430') - rgb) * (und2 * 0.5)[..., None]
+        # --- chipped arrises: pale exposed aggregate flakes with a dark notch below, along the beam edges
+        er2 = np.clip(B - cv2.erode(B, np.ones((5, 5), np.uint8)), 0, 1)
+        chipn = C.fbm(w, h, max(w / (5 * u), 4), 2, seed=98)
+        chip = er2 * C.smoothstep(0.66, 0.72, chipn)
+        rgb[:] = rgb + (cc('#c8bcb0') * 0.85 - rgb) * (chip * 0.7)[..., None]
+        chipd = np.clip(np.pad(chip, ((max(int(1.5 * u), 1), 0), (0, 0)))[:h] - chip, 0, 1)
+        rgb *= (1 - 0.5 * chipd)[..., None]
+        # --- warm sun glint along the top edges of the lit crossbars (broken, hot where the edge faces the sun)
+        TM = topm[y0:y1, x0:x1] * clipf[y0:y1, x0:x1]
+        TMe = np.clip(TM - np.pad(TM, ((max(int(1.2 * u), 1), 0), (0, 0)))[:h], 0, 1)
+        gn = C.fbm(w, h, max(w / (30 * u), 4), 2, seed=99)
+        xsr = np.arange(w, dtype=np.float32)[None] / max(w, 1)
+        gl_ = TMe * C.smoothstep(0.42, 0.6, gn) * (0.55 + 0.45 * xsr)
+        rgb[:] = rgb + (np.array([1.9, 1.2, 0.7], np.float32) - rgb) * np.clip(gl_ * 1.1, 0, 1)[..., None]
         cv.rgb[y0:y1, x0:x1] = rgb
+        # --- drip streaks: dark grime running down the slope from the underside of every horizontal beam,
+        # and moss cushions packed into the lattice joints (green-dark body, a warm-lit top)
+        drng = np.random.default_rng(97)
+        grime = cc('#26262e')
+        for ub in (2.0, 4.0):
+            for sp in np.arange(0.4, self.SV + 5, 0.35):
+                if drng.random() < 0.45:
+                    continue
+                s_ = sp + drng.uniform(-0.15, 0.15)
+                ln = drng.uniform(0.25, 1.1)
+                X0_, Y0_, Z0_ = self.lat_pt(s_, ub)
+                X1_, Y1_, Z1_ = self.lat_pt(s_ + drng.uniform(-0.03, 0.03), ub - ln)
+                if min(Z0_, Z1_) < 2.0:
+                    continue
+                a_ = sc.proj(X0_, Y0_, Z0_); b_ = sc.proj(X1_, Y1_, Z1_)
+                wd = max(sc.f * drng.uniform(0.04, 0.1) / Z0_, 0.6)
+                tt = np.linspace(0, 1, 6)
+                pts = [(a_[0] + (b_[0] - a_[0]) * t_, a_[1] + (b_[1] - a_[1]) * t_) for t_ in tt]
+                for k in range(5):
+                    self._clip_put(cv, cv.line_mask(pts[k:k + 2], wd * (1 - 0.15 * k)), grime, hm,
+                                   0.6 * (1 - k / 5.0) ** 0.8)
+        moss_d, moss_l = cc('#1c2a22'), cc('#56603a')
+        for ub in (0.0, 2.0, 4.0):
+            for sp in np.arange(0.5, self.SV + 5, 2.0):
+                X_, Y_, Z_ = self.lat_pt(sp + 0.3, ub + 0.17)
+                if Z_ < 2.5:
+                    continue
+                cx_, cy_ = sc.proj(X_, Y_, Z_)
+                R_ = sc.f * drng.uniform(0.11, 0.2) / Z_
+                if R_ < 1.2:
+                    continue
+                for k in range(int(drng.integers(3, 6))):
+                    ox_, oy_ = drng.normal(0, 0.45 * R_), drng.normal(0.25 * R_, 0.3 * R_)
+                    rr = R_ * drng.uniform(0.35, 0.6)
+                    th = np.linspace(0, 2 * np.pi, 14)
+                    rj = rr * (1 + 0.18 * np.sin(th * 3 + drng.uniform(0, 6)))
+                    poly = list(zip(cx_ + ox_ + rj * np.cos(th), cy_ + oy_ + rj * 0.7 * np.sin(th)))
+                    self._clip_put(cv, cv.poly_mask(poly), moss_d, hm, 0.7)
+                    top = list(zip(cx_ + ox_ + 0.2 * rr + rj * 0.7 * np.cos(th), cy_ + oy_ - 0.25 * rr + rj * 0.35 * np.sin(th)))
+                    self._clip_put(cv, cv.poly_mask(top), moss_l, hm, 0.45)
         # --- weeds at the foot of the beams
         rng = np.random.default_rng(94)
         dark = cc('#16202a')
@@ -550,34 +797,77 @@ class Land:
         ss = np.linspace(0.3, self.SV + 5, 300)
         tx, ty = sc.proj(*self.lat_pt(ss, 4.9))
         M, hx, hy = hm
-        k = max(int(0.012 * W), 1)
+        k = max(int(0.03 * W), 1)
         clipm = cv2.dilate(M, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * k + 1, 2 * k + 1)))
+        clipm = C.smoothstep(0.3, 0.7, cv2.GaussianBlur(clipm, (0, 0), 0.01 * W))
         clip = (clipm, hx, hy)
         fill, ridge = [], []
         n = len(rid)
-        for i in range(0, n, 5):
-            x, y = rid[i]
-            f = i / n
-            r = (0.07 * (1 - f) ** 1.2 + 0.011) * W * rng.uniform(0.55, 1.45)
-            ridge.append((x - r * 0.25 * rng.uniform(0.3, 1.0), y + r * 0.25, r, f))
-        for kk in range(120):
+        # skyline crowns: distinct cauliflower heads spaced along the ridge (a big one, then smaller
+        # ones), pushed out across the ridge line by varying amounts so the outline steps
+        i = 0.0
+        tan_ = np.gradient(rid, axis=0)
+        while i < n - 1:
+            ii = int(i)
+            x, y = rid[ii]
+            f = ii / n
+            r = (0.09 * (1 - f) ** 1.2 + 0.012) * W * rng.uniform(0.6, 1.5)
+            tx_, ty_ = tan_[ii] / (np.hypot(*tan_[ii]) + 1e-9)
+            nx_, ny_ = ty_, -tx_            # outward (up / right of the ridge running down-right)
+            if ny_ > 0:
+                nx_, ny_ = -nx_, -ny_
+            o = r * rng.uniform(-0.15, 0.3)
+            ridge.append((x + nx_ * o - r * 0.1, y + ny_ * o + r * 0.1, r, f))
+            # step along the ridge by ~0.8 r (in samples)
+            seg = np.hypot(*np.diff(rid[ii:ii + 2], axis=0)[0]) + 1e-6
+            i += max(0.8 * r / seg * rng.uniform(0.8, 1.2), 1.0)
+        for kk in range(14):
             j = rng.integers(0, len(tx))
             x, y = tx[j], ty[j]
             f = j / len(tx)
             up = rng.uniform(0, 1) ** 0.7
             x = x - up * rng.uniform(0.0, 0.25) * W * (1 - f)
             y = y - up * rng.uniform(0.0, 0.5) * H * (1 - f) ** 1.2
-            r = (0.055 * (1 - f) ** 1.3 + 0.01) * W * rng.uniform(0.45, 1.5) ** 1.3
+            r = (0.085 * (1 - f) ** 1.3 + 0.016) * W * rng.uniform(0.75, 1.25)
+            y = min(y, ty[j] - 0.7 * r)          # clump bottoms stay clear of the lattice: branches show below
             fill.append((x, y, r, f))
-        # back to front: higher (farther up the slope) first, then lower / nearer
-        fill.sort(key=lambda c: c[1] + c[2] * 0.5)
-        for (x, y, r, f) in fill:
-            LF.clump(cv, x, y, r, rng, FOL, L=(1.0, -0.35), lz=-0.3, flat=0.75, leaf=0.11, clip=clip, unit=u,
-                    rim=0.85, lit_bias=-0.24 + 0.1 * f, hot_amt=0.7)
-        ridge.sort(key=lambda c: c[2])
-        for (x, y, r, f) in ridge:
-            LF.clump(cv, x, y, r, rng, FOL, L=(1.0, -0.4), lz=-0.25, flat=0.75, leaf=0.1, unit=u, rim=1.0,
-                    lit_bias=-0.17, hot_amt=0.3)
+        # two filler masses against the left frame edge (no gaps through to the dark hill base)
+        fill += [(sc.ox + 0.004 * W, sc.oy + 0.3 * H, 0.05 * W, 0.0), (sc.ox + 0.01 * W, sc.oy + 0.47 * H, 0.045 * W, 0.0)]
+        # clump hierarchy (s06_seaside_tree2): big cauliflower clumps, back (high / far) to front (low / near)
+        cl = [l + (1,) for l in fill] + [l + (0,) for l in ridge]
+        cl.sort(key=lambda c: c[1] + 0.35 * c[2])
+        # a few dark branches read in the gaps under the lowest clumps (above the lattice)
+        brs = []
+        brng = np.random.default_rng(31)
+        for fx0 in (0.015, 0.05, 0.085, 0.12):
+            j = int(np.argmin(np.abs(tx - sc.ox - fx0 * W)))
+            bx0, by0 = tx[j], ty[j] + 6 * u
+            pts = [(bx0, by0)]
+            ang = -math.pi / 2 + brng.uniform(-0.45, 0.25)
+            for k in range(7):
+                ang += brng.normal(0, 0.25)
+                ln = brng.uniform(18, 30) * u
+                pts.append((pts[-1][0] + math.cos(ang) * ln, pts[-1][1] + math.sin(ang) * ln))
+            brs.append((pts, brng.uniform(7, 11) * u))
+            pts2 = [pts[2]]
+            a2 = ang + brng.choice([-1, 1]) * 0.8
+            for k in range(3):
+                pts2.append((pts2[-1][0] + math.cos(a2) * 20 * u, pts2[-1][1] + math.sin(a2) * 20 * u))
+            brs.append((pts2, 4 * u))
+        # dark undergrowth along the top of the lattice (behind the trunks / branches)
+        ug = []
+        urng = np.random.default_rng(37)
+        for j in range(0, int(len(tx) * 0.6), 6):
+            f = j / len(tx)
+            r = (0.03 * (1 - f) + 0.006) * W * urng.uniform(0.7, 1.3)
+            ug.append((tx[j] + urng.normal(0, 4 * u), ty[j] - r * urng.uniform(0.2, 0.6), r, f * 0.6, 1))
+        ug.sort(key=lambda c: c[1])
+        ug_pal = dict(T2.PAL2_DARK, deep=cc('#122030'), shd=cc('#18293a'), sky=cc('#22394a'), half=cc('#30443f'),
+                      lit=cc('#5e6436'), hot=cc('#b89048'))
+        T2.canopy2(cv, ug, np.random.default_rng(38), unit=u * 0.8, clip=clip, pal=ug_pal, lit_bias=0.12,
+                   leaf=0.8, sky_amt=0.8, soft_down=0.2, hang=0.2, far_haze=0.3, rim_amt=1.3)
+        T6.canopy6(self.tree, cl, np.random.default_rng(29), unit=u, clip=clip, branches=brs, far_haze=0.22, ss=2,
+                   wcv=self.tw)
 
     # ---------------------------------------------------------------- verge plants
     def _verge_plants(self, cv, wcv):
@@ -619,8 +909,10 @@ class Land:
                 P.grass_tuft(cv, bx, by, ph, rng, dark, rim, lean=0.1, wcv=wcv, n=int(rng.integers(6, 14)))
             else:
                 r = ph * 0.7
-                LF.clump(cv, bx, by - r * 0.45, r, rng, FOL_DARK, L=(0.9, -0.5), lz=-0.3, flat=0.7,
-                        leaf=0.16, unit=self.u, rim=0.8, hot_amt=0.0, lit_bias=-0.25)
+                lob = sorted([(bx + rng.uniform(-0.7, 0.7) * r, by - r * rng.uniform(0.3, 0.6), r * rng.uniform(0.4, 0.6),
+                               0.0, 0) for _ in range(int(rng.integers(2, 4)))], key=lambda c: c[1])
+                T2.canopy2(cv, lob, rng, unit=self.u * 0.6, pal=T2.PAL2_DARK, far_haze=0.0, lit_bias=-0.1,
+                           leaf=0.7, sky_amt=0.5, L=(-0.3, -0.5, -0.8))
 
     # ---------------------------------------------------------------- utility poles + wires
     def pole_top(self, sp, dx, Y):
@@ -710,13 +1002,64 @@ class Land:
                 # wires are NOT painted into the plate (a per-pixel depth warp kinks thin lines that cross
                 # other depths): they are stored in 3D and drawn per frame as clean catenaries
                 dd = np.hypot(px - sc.sun_p[0], py - sc.sun_p[1]) / sc.W
-                kk = 0.25 + 0.9 * np.exp(-(dd / 0.3) ** 2)
+                kk = 0.9 * np.exp(-(dd / 0.2) ** 2)          # warm rim only where the span crosses the sun glow
                 self.wires.append((px.astype(np.float64), py.astype(np.float64), zz.astype(np.float64),
                                    np.clip(kk, 0, 1)))
                 j = int(np.argmin(dd))
                 if dd[j] < 0.4 and 0 < j < len(px) - 1:
                     self.wire_glints.append((px[j], py[j], 1.0 / zz[j], float(np.exp(-(dd[j] / 0.25) ** 2)),
                                              float(dx * 3 + Y)))
+
+    def _cell_grass(self, cv, hm, UT):
+        """dab-painted grass in the lattice cells: short blade strokes laid in clusters (a few values: dark
+        roots, mid green, lit olive tips, warm sun-caught tips toward the sun side), denser at the top of each
+        cell where the grass spills over the crossbar. Painted once into the plate: static, no shimmer."""
+        sc = self.sc
+        u = self.u
+        rng = np.random.default_rng(612)
+        M, hx, hy = hm
+        lay = np.zeros((cv.H, cv.W, 3), np.float32)
+        al = np.zeros((cv.H, cv.W), np.float32)
+        cols = [cc('#1e2c28'), cc('#34482e'), cc('#56663a'), cc('#8a8446'), cc('#c89a5a')]
+        sunx = sc.sun_p[0]
+        for sp in np.arange(0.5, self.SV + 5, 2.0):
+            for u0 in np.arange(0.0, UT - 0.01, 2.0):
+                X0, Y0, Z0 = self.lat_pt(sp + 1.0, u0 + 1.0)
+                if Z0 < 2.0:
+                    continue
+                scale = sc.f / Z0                  # px per metre
+                if scale < 3:
+                    continue
+                n = int(np.clip(scale * scale * 0.9, 12, 420))
+                ss_ = rng.uniform(0.35, 1.95, n)
+                uu_ = 0.3 + 1.7 * rng.random(n) ** 0.6
+                Xs, Ys, Zs = self.lat_pt(sp + ss_, u0 + uu_)
+                px, py = sc.proj(Xs, Ys, Zs)
+                ks = float(np.exp(-((float(np.mean(px)) - sunx) / (0.6 * sc.W)) ** 2))
+                order = np.argsort(uu_)[::-1]            # far (upper) blades first
+                for k in order:
+                    hgt = scale * rng.uniform(0.12, 0.3)
+                    lean = rng.normal(0.25, 0.25)
+                    lit = uu_[k] / 2.0 * 0.6 + rng.uniform(0, 0.5)
+                    ci = int(np.clip(lit * 3.2, 0, 3))
+                    c_ = cols[ci]
+                    if ci >= 2 and rng.random() < 0.35 * ks:
+                        c_ = cols[4]
+                    x0, y0 = px[k], py[k]
+                    nb = int(rng.integers(2, 5))
+                    for j in range(nb):
+                        dx = (lean + rng.normal(0, 0.25)) * hgt * 0.5
+                        th = max(int(round(scale * 0.02)), 1)
+                        p0 = (int((x0 + j * 0.6 * u) * 4), int(y0 * 4))
+                        p1 = (int((x0 + j * 0.6 * u + dx) * 4), int((y0 - hgt * rng.uniform(0.7, 1.0)) * 4))
+                        cv2.line(lay, p0, p1, tuple(float(v) for v in c_), th, cv2.LINE_AA, 2)
+                        cv2.line(al, p0, p1, 1.0, th, cv2.LINE_AA, 2)
+        clip = np.zeros((cv.H, cv.W), np.float32)
+        clip[hy:hy + M.shape[0], hx:hx + M.shape[1]] = M
+        k = clip * 0.9
+        a = np.clip(al, 0, 1) * k
+        cv.rgb = cv.rgb * (1 - a[..., None]) + lay * k[..., None]
+        cv.a = a + cv.a * (1 - a)
 
     def _cell_texture(self, cv, hm, UT):
         """Darken the lattice toward its foot (occlusion by weeds) with stacked soft strips."""
@@ -735,7 +1078,7 @@ class Land:
         rim = cc('#ffab66')
         items = []
         for sp in np.arange(0.5, self.SV, 1.0):
-            for uu in (0.25, 2.25, 4.25):
+            for uu in (0.25, 2.25):
                 if rng.random() < 0.55:
                     X, Y, Z = self.lat_pt(sp + rng.uniform(0.3, 1.7), uu + rng.uniform(0, 0.3))
                     if Z > 3:
@@ -757,8 +1100,11 @@ class Land:
                 tmp = P.Canvas(cv.W, cv.H) if False else None
                 P.grass_tuft(cv, bx, by, ph, rng, dark, rim, lean=0.15, n=int(rng.integers(6, 12)), rim_amt=0.55)
             else:
-                LF.clump(cv, bx, by - ph * 0.3, ph * 0.6, rng, FOL_DARK, L=(1.0, -0.4), lz=-0.3, flat=0.7,
-                        leaf=0.14, unit=self.u, rim=0.8, hot_amt=0.0, lit_bias=-0.25)
+                r = ph * 0.6
+                lob = sorted([(bx + rng.uniform(-0.9, 0.9) * r, by - r * rng.uniform(0.15, 0.5), r * rng.uniform(0.35, 0.6),
+                               0.0, 0) for _ in range(int(rng.integers(2, 4)))], key=lambda c: c[1])
+                T2.canopy2(cv, lob, rng, unit=self.u * 0.7, pal=T2.PAL2_DARK, far_haze=0.0, lit_bias=-0.08,
+                           leaf=0.8, sky_amt=0.6)
         # clip the slope weeds to the hill silhouette (they must not float over the sea near the bend)
         M, hx, hy = hm
         clip = np.zeros((cv.H, cv.W), np.float32)

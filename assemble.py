@@ -17,6 +17,9 @@ match cut s05 -> s09 capped at ~70%, a single white pop into the s07 chorus, a s
 leak into s10.  s10 gets an eased digital push-in + crane-up; the finale rises to a warm,
 soft-kneed golden halation (never clipped), holds 4 frames and drops quickly to black through
 amber (no grey plate) while the bell chord rings out.
+Round-5: 15-bar score (post-chorus "breath" bar 11), lengths 8,4,5,4,5,5,5,8,4,8 beats; s08 moved
+after the comet so s04/s08 are no longer adjacent; no dissolves; additive-only pop, leak and
+finale halation (see EDL notes).
 
 The picture is composited in float (sources decoded to 16-bit RGB), converted to BT.709
 Y'CbCr with TPDF dither and piped to x264 as 4:2:0 -- no 8-bit re-quantisation of
@@ -53,35 +56,64 @@ BAR = 4 * BEAT               # 2.5 s
 #   golden: s06 seaside sunset | s03 city dusk
 #   night:  s04 rain | s08 snow --white pop--> s07 comet (hero, chorus)
 #   dawn:   --golden light leak--> s10 sea of clouds (hero finale, slow digital push-in)
+#
+# Round-5 (re-rendered s01/s03/s05/s07/s09, reconceived s10 = summit torii at sunrise):
+#   * s04 rain and s08 snow no longer back to back (both lateral trucks): s08 moves after the
+#     comet chorus as a one-bar quiet "breath" and hands the lamp light to the dawn finale.
+#   * s06 seaside 3 -> 5 beats.  Dissolves removed (no busy superimpositions): hard cuts on the beat
+#     plus three optical transitions only (sun glare match, additive bloom pop, lamp -> sun leak).
+#   * s07 pop is built from additive bloom + exposure push (no lerp to white = no milky grey veil).
+#   * s10 opens on a saturated, readable frame: the leak is a small local warm glow near the sun,
+#     additive and <= 0.20 at its peak, gone in half a second.  No digital push (the shot now has
+#     its own crane/truck move).
+# Round-6 (re-rendered s01/s03/s05/s07/s09, s10 torii summit re-rendered): windows re-picked by motion scan
+#   (s01 crane 12-132, s05 crane 45-120 ending on the sun, s09 30-90, s03 50-125 ending on the billboard,
+#   s07 tilt 6-126, s10 truck 0-144).  s06 5 -> 6 beats, s04 5 -> 4 (its peak-motion window).
+#   Pop into s07 rebuilt as LOCAL additive bloom: sourced from the brightest neon sign (pre) and the comet
+#   core (post), additive glow capped at 0.5, cleared from the landscape in 5 frames -- no exposure push,
+#   no full-frame veil.  Glare-out centre re-measured on the new s05 sun.
+# Round-7 (re-rendered s01/s03/s05/s06/s07/s08/s09/s10): windows re-picked by motion scan + contact sheets.
+#   s01 now starts on frame 0 so the city strip holds under the crane-up before the tower takes the frame.
+#   s06 6 -> 7 beats (src 15-120, the whole crane move), s03 5 -> 4 beats (66-126, its fastest stretch that
+#   still lands on the billboard) so s03 cuts in on the bar-7 downbeat.
+#   Transition anchors re-measured: s05 sun, s09 window sun, s07 comet head, s08 lamp head, s10 sun.
+#   s04 and s08 (both slow leftward trucks) stay separated by the s07 comet chorus.
 EDL = [
-    ('s01_summer_sky',       12, 8, ('fadein', 20)),          # HERO  opening, 5.0 s
+    ('s01_summer_sky',        0, 8, ('fadein', 16)),          # HERO  crane-up from the rooftops to the cumulus tower, 5.0 s
     ('s02_railway_crossing', 12, 4, ('cut',)),                # barrier arm coming down
-    ('s05_sakura',           45, 5, ('cut',)),                # decelerating crane-up that ends on sky + sun
-    ('s09_classroom',        24, 4, ('glare', 7, 10)),        # sakura sun glare -> window sun (match cut, capped ~70%)
-    ('s06_seaside',          40, 3, ('dissolve', 8)),         # warm afternoon -> sunset (short)
-    ('s03_city_dusk',        44, 5, ('dissolve', 6)),         # sunset horizon -> dusk horizon (short), ends on billboard
-    ('s04_rain_street',      46, 3, ('cut',)),                # hard cut on the beat (magenta -> neon)
-    ('s08_snow_station',     37, 4, ('cut',)),
-    ('s07_comet_night',       6, 8, ('flash', 3, 8)),         # HERO  comet, chorus downbeat - the only white pop
-    ('s10_sea_of_clouds',     0, 8, ('leak', 3, 12)),         # HERO  finale: hard cut on the downbeat + golden light leak
+    ('s05_sakura',           45, 5, ('cut',)),                # crane-up through the blossom that ends on sky + sun
+    ('s09_classroom',        30, 4, ('glare', 7, 10)),        # sakura sun glare -> window sun (match cut, capped ~70%)
+    ('s06_seaside',          15, 7, ('cut',)),                # sunset road by the sea (7 beats: the longest non-hero hold)
+    ('s03_city_dusk',        66, 4, ('cut',)),                # dusk skyline truck, ends on the billboard (cut on bar 7)
+    ('s04_rain_street',      36, 4, ('cut',)),                # neon rain push (its peak-motion 4 beats)
+    ('s07_comet_night',       6, 8, ('flash', 3, 5)),         # HERO  comet, chorus downbeat - local additive bloom pop
+    ('s08_snow_station',     36, 4, ('cut',)),                # post-chorus breath; lamp light carries into the dawn
+    ('s10_sea_of_clouds',     0, 8, ('leak', 5, 12)),         # HERO  finale: hard cut on the downbeat, local warm leak
 ]
 END_WHITE = 2 * FPB     # last 2 beats of s10: sun bloom swells
 END_HALO = 10           # ...and the last 10 frames rise to a warm golden halation (never clipped)
-HALO_MAX = 0.45         # halation amount at the peak (warm golden, ~83-85% luma; clouds still read through)
-HALO_TINT = np.array([1.0, 0.93, 0.80], np.float32)
-END_HOLD = 4            # frames holding the halation (picture keeps moving under it)
-END_BLACK = 7           # quick halation -> black, warming to amber as it darkens (no lingering grey plate)
-END_PAD = 30            # black while the reverb rings out
-
-# s10 slow eased push-in + crane-up (source camera is nearly static)
-PUSH_SCALE = 0.085      # total zoom over the shot
-PUSH_RISE = 0.030       # content drifts down (camera rises) by this fraction of H
-PUSH_CENTER = (0.5, 0.47)
+HALO_MAX = 0.20         # additive warm glow around the sun at the peak (torii + clouds still read through)
+HALO_TINT = np.array([1.0, 0.78, 0.50], np.float32)   # warm gold sun bloom
+END_HOLD = 0            # no held peak: the fade starts on the halation peak so the camera keeps moving to the last source frame
+END_BLACK = 24          # 24-frame halation -> black, warming to amber as it darkens (camera still moving)
+END_PAD = 17            # black while the reverb rings out (total length unchanged)
+S10_SRC_FRAMES = 144
 
 # glare centres (normalised x, y-of-height) for the s05 -> s09 match cut: sakura sun / window sun
-GLARE_OUT = (0.172, 0.71)
-GLARE_IN = (0.440, 0.225)
+GLARE_OUT = (0.170, 0.312)     # s05 sun (measured on the round-6 render, frame 119)
+GLARE_IN = (0.426, 0.239)      # s09 window sun at its in-point
 GLARE_CAP = 0.70        # max white contribution of the glare
+
+# s08 lamp head (x, y-of-height) at the end of its window, and the s10 sun, for the dawn leak
+LAMP_POS = (0.572, 0.070)   # measured on the round-7 s08 render, frame 95
+S10_SUN = (0.615, 0.393)  # sun at the s10 in-point (measured on the round-7 render)
+S10_SUN_END = (0.615, 0.368)  # the sun has climbed by the end of the s10 window
+LEAK_MAX = 0.20         # max additive value of the s10 leak
+
+# s04 -> s07 pop sources (x, y-of-height): the red ramen neon in s04, the comet head in s07
+SIGN_POS = (0.355, 0.30)
+COMET_POS = (0.630, 0.625)
+POP_MAX = 0.50          # cap of the additive pop glow
 
 
 def timeline():
@@ -93,7 +125,7 @@ def timeline():
     content = f
     total = content + END_HOLD + END_BLACK + END_PAD
     last_src = EDL[-1][1] + (content - starts[-1]) + END_HOLD + END_BLACK
-    assert last_src <= 138, 's10 source frames >= 138 contain a glitch'
+    assert last_src <= S10_SRC_FRAMES, 's10 window runs past the end of the render'
     return starts, content, total
 
 
@@ -246,20 +278,23 @@ THIRD = {'maj': 4, 'min': 3, 'sus': 5}
 # One bar = 4 beats = 2.5 s = 60 frames, bar 0 downbeat at t = 0.
 #   bars 0-1  intro         s01 hero (beats 0-7)
 #   bars 2-5  verse (day)   s02 b8, s05 b12, s09 b17 (glare swell), s06 b21
-#   bars 6-8  build (dusk/night) s03 b24, s04 b29, s08 b32; strings creep in, riser through bar 8
+#   bars 6-8  build (dusk/night) s03 b28, s04 b32; strings creep in, riser through bar 8
 #   bar  9    FLASH         -> chorus bars 9-10: s07 hero (b36)
-#   bar  11   LEAK          -> finale bars 11-12: s10 hero (b44), IV-V | I, golden halation peak on bar 13
+#   bar  11   BREATH        post-chorus bar, dynamics drop back: s08 snow (b44)
+#   bar  12   LEAK          -> finale bars 12-13: s10 hero (b48), IV-V | I, golden halation peak on bar 14
 BARS = [
     ['IV'], ['Vsus', 'V'],
     ['I'], ['V'], ['vi'], ['iii'],
     ['IV'], ['iii', 'vi'], ['ii', 'Vsus'],
     ['IV'], ['V', 'vi'],
+    ['ii', 'Vsus'],
     ['IV', 'V'], ['I'], ['I'],
 ]
-FLASH_BARS = (9, 11)
-STRING_CREEP = {6: 0.07, 7: 0.12, 8: 0.18}     # strings fade in under the dusk/night build
-RESOLVE_BAR = 12          # tonic arrival, arpeggio slows to quarters and rings out
-END_BAR = 13              # halation peak
+FLASH_BARS = (9, 12)
+BREATH_BAR = 11
+STRING_CREEP = {6: 0.07, 7: 0.12, 8: 0.18, BREATH_BAR: 0.20}   # strings under the build and the breath
+RESOLVE_BAR = 13          # tonic arrival, arpeggio slows to quarters and rings out
+END_BAR = 14              # halation peak
 
 # melody: (bar, beat, midi, beats)
 MELODY = [
@@ -273,9 +308,11 @@ MELODY = [
     # chorus (bars 9-10)
     (9, 0, 83, 1), (9, 1, 81, 0.5), (9, 1.5, 83, 0.5), (9, 2, 86, 1.5), (9, 3.5, 83, 0.5),
     (10, 0, 81, 1), (10, 1, 83, 1), (10, 2, 78, 1.5), (10, 3.5, 85, 0.5),
+    # breath: a soft answer to the chorus
+    (11, 0, 81, 1.5), (11, 1.5, 79, 0.5), (11, 2, 76, 1.5), (11, 3.5, 81, 0.5),
     # finale
-    (11, 0, 86, 1.5), (11, 1.5, 85, 0.5), (11, 2, 85, 1), (11, 3, 88, 1),
-    (12, 0, 86, 6),
+    (12, 0, 86, 1.5), (12, 1.5, 85, 0.5), (12, 2, 85, 1), (12, 3, 88, 1),
+    (13, 0, 86, 6),
 ]
 
 
@@ -287,7 +324,7 @@ def chord_tones(name):
 def section_level(bar):
     if bar < 2:
         return 0
-    if bar < FLASH_BARS[0]:
+    if bar < FLASH_BARS[0] or bar == BREATH_BAR:
         return 1
     if bar < FLASH_BARS[1]:
         return 2
@@ -401,9 +438,9 @@ def synth_score(total, cut_beats, glare_beats=()):
     for (b, bt, m, nb_) in MELODY:
         ts = T(b, bt)
         dur = nb_ * beat
-        vel = 0.62 if b < FLASH_BARS[0] else 0.78
+        vel = 0.62 if b < FLASH_BARS[0] or b == BREATH_BAR else 0.78
         mix.add('lead', ts, piano_note(m, vel, dur + 0.05), 0.05)
-        if b >= FLASH_BARS[0]:
+        if b >= FLASH_BARS[0] and b != BREATH_BAR:
             tt = np.arange(int((dur + 0.5) * SR)) / SR
             vib = 1 + 0.004 * np.sin(2 * np.pi * 5.2 * tt) * np.clip((tt - 0.25) / 0.4, 0, 1)
             ph = 2 * np.pi * np.cumsum(mtof(m) * vib) / SR
@@ -599,7 +636,7 @@ def glare(img, center, p, color=(1.0, 0.93, 0.80)):
     """Lamp/sun glare that swells to (nearly) fill frame as p -> 1."""
     cx, cy = center[0], center[1] * H / W
     r = np.sqrt((_XX - cx) ** 2 + (_YY - cy) ** 2)
-    sigma = 0.02 + 0.7 * p ** 2          # glare stays centred on the sun, not a uniform veil
+    sigma = 0.02 + 0.38 * p ** 2         # glare stays centred on the sun, not a uniform veil
     g = np.exp(-(r / sigma) ** 1.5) * (0.5 + 0.7 * p)
     streak = np.exp(-((_YY - cy) / (0.004 + 0.02 * p)) ** 2) * np.exp(-((_XX - cx) / (0.25 + 0.6 * p)) ** 2) * 0.5 * p
     col = np.array(color, np.float32)
@@ -609,13 +646,15 @@ def glare(img, center, p, color=(1.0, 0.93, 0.80)):
     return knee(out, 0.82, 0.965)
 
 
-def push_in(img, n, total_n):
-    """Eased digital push-in + crane-up for the finale (bicubic on float, no requantisation)."""
-    u = smoothstep(n / max(1, total_n - 1)) * 0.85 + 0.15 * (n / max(1, total_n - 1))
-    s = 1.0 + PUSH_SCALE * u
-    cx, cy = PUSH_CENTER[0] * W, PUSH_CENTER[1] * H
-    M = np.array([[s, 0, cx - s * cx], [0, s, cy - s * cy + PUSH_RISE * H * u]], np.float32)
-    return cv2.warpAffine(img, M, (W, H), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+def add_glow(img, center, radius, color, amount):
+    """Additive local glow; center is (x, y-of-height)."""
+    return img + leak((center[0], center[1] * H / W), radius, color, amount)
+
+
+def exposure_pop(img, e, b, thresh):
+    """White pop built additively: exposure push (blacks stay black, hues kept) + highlight bloom,
+    rolled off by a soft shoulder instead of lerping the frame toward a white plate."""
+    return knee(bloom(img * (1.0 + e), b, thresh=thresh, sigma=55), 0.80, 0.985)
 
 
 def knee(img, k0=0.84, top=0.955):
@@ -624,23 +663,26 @@ def knee(img, k0=0.84, top=0.955):
     return np.where(img > k0, k0 + r * np.tanh((img - k0) / r), img).astype(np.float32)
 
 
-def finale_halo(img, pb, ph):
+def finale_halo(img, pb, ph, fade=None):
     """Finale grade.  pb 0..1: gentle sun bloom over the last 2 beats (soft-kneed, never clipped).
-    ph 0..1: warm golden halation -> at most HALO_MAX of a warm off-white; never a clipped plate."""
+    ph 0..1: warm golden halation built additively (exposure lift + wide sun bloom + a warm glow
+    around the sun) -- no lerp toward a white plate, so the silhouettes stay dark and saturated."""
     img = knee(bloom(img, 0.5 * pb ** 1.5, thresh=0.6))
     if ph <= 0:
         return img
-    img = bloom(img, 0.45 * ph, thresh=0.65)
-    img = screen(img, leak((0.5, 0.26), 0.40, (1.0, 0.80, 0.52), 0.35 * ph))
-    img = knee(img)
-    return whiteout(img, HALO_MAX * ph ** 1.6, HALO_TINT * 0.97)
+    # capped: a warm bloom around the sun only (high threshold, small exposure lift) so the torii and the
+    # near clouds keep their silhouette contrast under the glow
+    img = bloom(img * (1.0 + 0.08 * ph), 0.3 * ph, thresh=0.75, sigma=60)
+    img = add_glow(img, S10_SUN_END, 0.16, HALO_TINT, HALO_MAX * ph ** 1.4)
+    if fade is not None:           # darken before the shoulder: the sun core sinks through amber, not khaki
+        img = img * fade
+    return knee(img, 0.80, 0.97)
 
 
 def s10_frame(src, f, starts, content):
     i = len(EDL) - 1
     n = f - starts[i]
-    total_n = content - starts[i] + END_HOLD + END_BLACK
-    return knee(push_in(src.get(i, n), n, total_n))
+    return knee(src.get(i, n))
 
 
 def compose(src, f, starts, content):
@@ -649,13 +691,13 @@ def compose(src, f, starts, content):
         k = f - content
         if k >= END_HOLD + END_BLACK:
             return np.zeros((H, W, 3), np.float32)
-        img = finale_halo(s10_frame(src, f, starts, content), 1.0, 1.0)
         if k < END_HOLD:
-            return img
+            return finale_halo(s10_frame(src, f, starts, content), 1.0, 1.0)
         k -= END_HOLD
         v = 1.0 - smoothstep((k + 1) / END_BLACK)
         # darken toward amber rather than grey: blue drops first, red last
-        return img * np.array([v ** 0.85, v ** 1.1, v ** 1.6], np.float32)
+        return finale_halo(s10_frame(src, f, starts, content), 1.0, 1.0,
+                           fade=np.array([v ** 1.0, v ** 1.25, v ** 1.6], np.float32))
 
     i = max(j for j, s in enumerate(starts) if s <= f)
     img = s10_frame(src, f, starts, content) if i == len(EDL) - 1 else src.get(i, f - starts[i])
@@ -673,22 +715,19 @@ def compose(src, f, starts, content):
         post = tr_in[2]
         k = f - starts[i]
         if k < post:
-            q = 1 - k / post
-            img = bloom(img, 1.6 * q)
-            if i == len(EDL) - 1:      # into the finale: golden leak from the right
-                img = screen(img, leak((1.05, 0.15), 0.35, (1.0, 0.72, 0.42), 0.75 * q ** 0.7))
-            else:                      # into the comet night: violet/cyan leak from the top left
-                img = screen(img, leak((-0.05, -0.02), 0.32, (0.62, 0.55, 1.0), 0.7 * q ** 0.7))
-            img = whiteout(img, q ** 2.2)
+            q = (1 - k / post) ** 1.6      # gone from the landscape within `post` frames
+            img = bloom(img, 0.9 * q, thresh=0.55, sigma=50)
+            img = add_glow(img, COMET_POS, 0.10, (0.80, 0.92, 1.0), POP_MAX * q)
+            img = add_glow(img, COMET_POS, 0.035, (1.0, 1.0, 1.0), 0.35 * q)
+            img = knee(img, 0.80, 0.97)
     elif tr_in[0] == 'leak':
         post = tr_in[2]
         k = f - starts[i]
         if k < post:
-            q = 1 - k / post
-            img = bloom(img, 0.7 * q, thresh=0.6)
-            img = screen(img, leak((1.05, 0.12), 0.40, (1.0, 0.70, 0.40), 0.55 * q ** 0.8))
-            img = screen(img, leak((0.85, -0.05), 0.22, (1.0, 0.86, 0.62), 0.30 * q))
-            img = knee(whiteout(img, 0.12 * q ** 2), 0.82, 0.96)
+            q = (1 - k / post) ** 1.3
+            lay = leak((S10_SUN[0], S10_SUN[1] * H / W), 0.16, (1.0, 0.80, 0.52), 1.0)
+            lay += leak((S10_SUN[0] + 0.05, S10_SUN[1] * H / W - 0.02), 0.07, (1.0, 0.90, 0.72), 0.5)
+            img = img + np.minimum(lay, 1.0) * (LEAK_MAX * q)       # local, additive, <= LEAK_MAX
     elif tr_in[0] == 'glare':
         post = tr_in[2]
         k = f - starts[i]
@@ -713,15 +752,18 @@ def compose(src, f, starts, content):
             pre = nxt[1]
             k = c - f
             if k <= pre:
-                p = (pre - k + 1) / pre
-                img = whiteout(bloom(img, 1.8 * p), 0.9 * p ** 2)
+                p = ((pre - k + 1) / pre) ** 1.5
+                img = bloom(img, 0.8 * p, thresh=0.6, sigma=45)
+                img = add_glow(img, SIGN_POS, 0.11, (1.0, 0.72, 0.84), POP_MAX * p)
+                img = knee(img, 0.80, 0.97)
         elif nxt[0] == 'leak':
             pre = nxt[1]
             k = c - f
             if k <= pre:
                 p = (pre - k + 1) / pre
-                img = bloom(img, 0.8 * p, thresh=0.6)
-                img = knee(screen(img, leak((1.05, 0.12), 0.30, (1.0, 0.72, 0.42), 0.45 * p ** 1.5)), 0.82, 0.96)
+                img = bloom(img, 1.4 * p ** 1.5, thresh=0.55, sigma=45)
+                img = add_glow(img, LAMP_POS, 0.10, (1.0, 0.80, 0.50), 0.30 * p ** 1.6)
+                img = knee(img, 0.82, 0.975)
         elif nxt[0] == 'glare':
             pre = nxt[1]
             k = c - f

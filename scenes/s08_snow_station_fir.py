@@ -227,7 +227,7 @@ def fir(cv, bu, bv, hpx, z, seed, fol=(0.03, 0.055, 0.095), snow_top=(0.64, 0.74
             hc = min(hc, L_ * 0.6)
             asym = rng.uniform(0.35, 0.65)
             uu = np.where(u < asym, u / asym * 0.5, 0.5 + (u - asym) / (1 - asym) * 0.5)
-            prof = np.sin(np.pi * uu) ** 0.6
+            prof = np.sin(np.pi * uu) ** 0.35
             nl = int(rng.integers(2, 5))
             lump = 0.8 + 0.25 * np.abs(np.sin(np.pi * u * nl + rng.uniform(0, 6))) + rng.normal(0, 0.03, mm)
             st = ycq - hc * prof * lump
@@ -249,24 +249,23 @@ def fir(cv, bu, bv, hpx, z, seed, fol=(0.03, 0.055, 0.095), snow_top=(0.64, 0.74
             xo, sto, sbo = xq[o], st[o], sb[o]
             tso = (tt_side if front else tq * side)
             tso = np.interp(xo, xq[o], (np.linspace(-1, 1, mm) if front else tq * side)[o])
-            rw = max(hc * rng.uniform(0.14, 0.22), S * 1.1)
+            rw = max(hc * rng.uniform(0.05, 0.08), S * 1.0)
             shade_k = rng.uniform(0.95, 1.05)
 
             def snowc(X, Y, xo=xo, sto=sto, sbo=sbo, tso=tso, shade_k=shade_k):
                 st_ = np.interp(X, xo, sto)
                 sb_ = np.interp(X, xo, sbo)
                 v = np.clip((Y - st_) / np.maximum(sb_ - st_, 1), 0, 1)
-                k = _ss(0.3, 1.0, v)[..., None]
-                c = s_top * (1 - k) + s_shd * k
-                # rounded-form shading across the clump
-                xn = (X - xo[0]) / max(xo[-1] - xo[0], 1) * 2 - 1
-                c = c * (1 - 0.1 * np.clip(xn * (-wdir if wdir else -1), 0, 1)[..., None] ** 2)
+                # flat painted planes: pale lit top / one cool shadow value, crisp jagged split
+                jg = 0.07 * np.sin(X * 0.21 + sto[0]) + 0.05 * np.sin(X * 0.53 + 1.7)
+                k = _ss(0.5, 0.53, v + jg)[..., None]
+                c = s_top * (1 - k) + (s_shd * 1.1) * k
                 return c * shade_k
 
             def rimf(X, Y, xo=xo, sto=sto, rw=rw):
                 st_ = np.interp(X, xo, sto)
                 d = Y - st_
-                return np.clip(1 - d / rw, 0, 1) ** 0.8
+                return _ss(rw, rw * 0.55, d) * 0.85
             put(np.concatenate([np.stack([xq, st], 1), np.stack([xq[::-1], sb[::-1]], 1)]), snowc, 1.0, rimf)
 
     for (r, side, Lb, front) in branches:
@@ -290,9 +289,8 @@ def fir(cv, bu, bv, hpx, z, seed, fol=(0.03, 0.055, 0.095), snow_top=(0.64, 0.74
         def mound(X, Y):
             st_ = np.interp(X, o_x, o_t)
             v = np.clip((Y - st_) / max(hgt * 1.6, 1), 0, 1)[..., None]
-            xn = np.clip((X - bx) / wd, -1, 1)[..., None]
-            c = s_top * 0.74 * (1 - 0.55 * v) + s_shd * 0.55 * v
-            return c * (1 - 0.12 * np.clip(-xn * (wdir if wdir else 1), 0, 1))
+            k = _ss(0.42, 0.46, v)
+            return s_top * 0.78 * (1 - k) + s_shd * 1.1 * k
 
         def mrim(X, Y):
             st_ = np.interp(X, o_x, o_t)
@@ -309,7 +307,7 @@ def fir(cv, bu, bv, hpx, z, seed, fol=(0.03, 0.055, 0.095), snow_top=(0.64, 0.74
                                      * (1 + 0.15 * np.sin(tt_ * 3))], 1),
                            [[ax + tipw * 2.2, top + H * 0.085], [ax, top + H * 0.095], [ax - tipw * 2.2, top + H * 0.085]]])
     cy0, cy1 = top + H * 0.07 - tipw * 2.4, top + H * 0.095
-    put(capp, lambda X, Y: s_top * (1 - _ss(cy0, cy1, Y)[..., None] * 0.45) + s_shd * _ss(cy0, cy1, Y)[..., None] * 0.45, 1.0,
+    put(capp, lambda X, Y: s_top * (1 - _ss(0.5, 0.56, (Y - cy0) / max(cy1 - cy0, 1))[..., None]) + s_shd * 1.1 * _ss(0.5, 0.56, (Y - cy0) / max(cy1 - cy0, 1))[..., None], 1.0,
         lambda X, Y: np.clip(1 - (Y - cy0) / max(tipw * 0.9, 1), 0, 1))
 
     # ---- texture: vertical needle streaks in the dark masses, soft brush strokes inside the snow
@@ -326,7 +324,7 @@ def fir(cv, bu, bv, hpx, z, seed, fol=(0.03, 0.055, 0.095), snow_top=(0.64, 0.74
     bt = rng.random((max(Hh // (5 * S), 2), max(Ww // (14 * S), 2))).astype(np.float32)
     bt = cv2.resize(bt, (Ww, Hh), interpolation=cv2.INTER_CUBIC)
     bt = cv2.GaussianBlur(bt, (0, 0), sigmaX=2.5 * S, sigmaY=0.8 * S)
-    col = col * (1 + (snowm * (1 - rimm) * (bt - 0.5) * 0.1)[..., None])
+    col = col * (1 + (snowm * (1 - rimm) * (bt - 0.5) * 0.03)[..., None])
 
     # ---- rims on the cap tops: cool sky rim everywhere, warm lamp rim on the lamp side
     xxS = (np.arange(Ww, dtype=np.float32)[None, :] - cx) / max(hw, 1)

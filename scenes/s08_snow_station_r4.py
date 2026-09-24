@@ -137,7 +137,7 @@ def soft_night_clouds(img, horizon_v, s, glow_centres=(), seed=21):
 
 
 # ----------------------------------------------------------------------------- secondary lamp
-def small_cone(PW, PH, lu, lv, ground_v, s, half_ang=0.36, amber=(1.0, 0.74, 0.36), strength=0.22):
+def small_cone(PW, PH, lu, lv, ground_v, s, half_ang=0.36, amber=(1.0, 0.74, 0.36), strength=0.22, halo=1.0):
     """Screen-space painted beam for a small downward lamp at (lu, lv) px whose light reaches down to
     about ground_v px: a tight cone with feathered edges, brightest near the head, fading with length,
     plus a soft halation disc round the head."""
@@ -149,11 +149,14 @@ def small_cone(PW, PH, lu, lv, ground_v, s, half_ang=0.36, amber=(1.0, 0.74, 0.3
     L = max(ground_v - lv, 10.0)
     dx = xx - lu
     rel = np.abs(dx) / np.maximum(dy * math.tan(half_ang) + 6 * s, 1e-3)
-    across = np.clip(1 - rel, 0, 1) ** 1.4
-    along = np.clip(dy / (10 * s), 0, 1) * np.exp(-np.clip(dy, 0, None) / (0.55 * L)) * (dy > 0)
+    # (cycle 7) feathered shaft: gaussian cross-profile (no hard trapezoid edge), density thinning
+    # quickly with distance from the head
+    across = np.exp(-(rel / 0.62) ** 2)
+    along = np.clip(dy / (14 * s), 0, 1) * np.exp(-np.clip(dy, 0, None) / (0.38 * L)) * (dy > 0)
     beam = across * along
     d2 = dx * dx + dy * dy
     hal = 0.9 * np.exp(-d2 / (2 * (10 * s) ** 2)) + 0.35 * np.exp(-d2 / (2 * (40 * s) ** 2))
-    v = cv2.GaussianBlur((beam * strength + hal * 0.35).astype(np.float32), (0, 0), 1.5 * s + 0.3)
+    v = cv2.GaussianBlur((beam * strength).astype(np.float32), (0, 0), 6 * s / q + 0.5) + (hal * 0.35 * halo).astype(np.float32)
+    v = cv2.GaussianBlur(v, (0, 0), 1.5 * s + 0.3)
     v = cv2.resize(v, (PW, PH), interpolation=cv2.INTER_LINEAR)
     return v[..., None] * np.asarray(amber, np.float32)

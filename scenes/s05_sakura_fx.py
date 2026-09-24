@@ -65,12 +65,12 @@ class SunFlare:
             ang = (ang + math.pi) % (2 * math.pi) - math.pi
             idx = ((ang + math.pi) / (2 * math.pi) * len(self.pa)).astype(np.int32) % len(self.pa)
             amp = self.pamp[idx]
-            L = self.pln[idx] * 0.3
+            L = self.pln[idx] * 0.16          # round 19: shorter rays (no long scratch lines across the sky)
             rays = amp * np.exp(-dW / np.maximum(L * 0.4, 1e-3)) * np.clip(dW / 0.008, 0, 1)
             R = 0.0105
             disc = np.clip((R - dW) / 0.0012 + 0.5, 0, 1)                   # crisp disc edge
             core = 1.0 / (1.0 + (dW / (R * 1.25)) ** 4)                       # hot corona
-            glow = np.exp(-dW / 0.035) * 0.3 + np.exp(-dW / 0.1) * 0.08
+            glow = np.exp(-dW / 0.035) * 0.3 * getattr(self, 'g1', 1.0) + np.exp(-dW / 0.1) * 0.08 * getattr(self, 'g2', 1.0)
             ring = np.exp(-((dW - 0.13) / 0.006) ** 2) * 0.035               # faint rainbow halo
             hue = np.stack([np.clip(0.5 + (dW - 0.13) * 60, 0, 1), np.ones_like(dW) * 0.8,
                             np.clip(0.5 - (dW - 0.13) * 60, 0, 1)], -1)

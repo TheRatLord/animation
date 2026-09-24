@@ -32,6 +32,7 @@ import s08_snow_station_bokeh as BK  # noqa: E402
 import s08_snow_station_tex2 as T2  # noqa: E402
 import s08_snow_station_r3 as R3  # noqa: E402
 import s08_snow_station_r4 as R4  # noqa: E402
+import s08_snow_station_r5 as R5  # noqa: E402
 
 DURATION = 5.0
 ZSPLIT = 40.0
@@ -73,6 +74,20 @@ def snow_lit(amb, E, bump=1.0):
     tgt = np.stack([np.interp(e, _RAMP_E, _RAMP_C[:, c]) for c in range(3)], -1).astype(np.float32)
     w = (1 - np.exp(-e * 3.0))[..., None]
     return (amb * (1 - w) + tgt * w) * bump
+
+
+def paint_E(E, step=2.3, soft=0.1, mix=0.7):
+    """Hand-painted light: the irradiance magnitude is laid in as a few flat value plateaus (a warm
+    pool with a readable edge, then a cool shade value) instead of a smooth CG falloff. Hue is kept."""
+    E = np.asarray(E, np.float32)
+    e = E.mean(-1, keepdims=True)
+    l = np.log(e + 0.02) / math.log(step)
+    fl = np.floor(l)
+    fr = l - fl
+    q = fl + np.clip((fr - (1 - soft)) / soft, 0, 1) ** 2 * (3 - 2 * np.clip((fr - (1 - soft)) / soft, 0, 1)) + 0.5
+    eb = np.exp(q * math.log(step)) - 0.02
+    eb = np.maximum(eb, 0) * mix + e * (1 - mix)
+    return (E * (eb / np.maximum(e, 1e-5))).astype(np.float32)
 
 
 def cone_params(lamp):
@@ -147,9 +162,13 @@ class Scene:
         self.L_gnd = self.gnd.rgba()
         self.gnd_id = self.plat_id
         self.L_mid = self.mid.rgba()
+        self._aerial_fade(self.midf)
+        self._aerial_fade(self.mid, near=True)
         self.L_midf = self.midf.rgba()
         self.sprites = []
-        for k, zr in (('tree', 11.5), ('bench', 10.3), ('sign', 8.2), ('lamp', 6.5)):
+        # parallax depths of the sprite planes (the framing pine is pulled nearer than it is drawn, so
+        # it reads as the true foreground plane: ~4x the canopy's screen speed, ~12x the village's)
+        for k, zr in (('tree', 4.8), ('bench', 10.3), ('sign', 8.2), ('lamp', 6.5)):
             self.sprites.append((k, zr) + self._crop(self.fgs[k]))
         del self.rx, self.ry
         self._flakes()
@@ -161,6 +180,31 @@ class Scene:
         self._sparkles()
 
     # ------------------------------------------------------------------ helpers
+    def _aerial_fade(self, cv, near=False):
+        """Aerial perspective into the snowfall: the village and treeline beyond the platform sink into a
+        luminous blue snow haze (lower contrast than the midground), lit windows keep a little punch."""
+        z = np.where(cv.a > 0.02, cv.z, 1e4)
+        z = cv2.erode(np.minimum(z, 400.0).astype(np.float32), np.ones((3, 3), np.uint8))
+        if near:
+            k = 0.16 * C.smoothstep(26.0, 42.0, z)
+        else:
+            k = 0.46 * C.smoothstep(34.0, 54.0, z) + 0.2 * C.smoothstep(58.0, 110.0, z)
+        lum = cv.rgb.max(-1)
+        k = k * (1 - 0.45 * C.smoothstep(0.55, 1.4, lum))
+        haze = FOG * 1.18 + np.array([0.01, 0.015, 0.03], np.float32)
+        cv.rgb = (cv.rgb * (1 - k[..., None]) + haze * k[..., None]).astype(np.float32)
+        if not near:
+            # round 5: the village sits inside the snowfall - its blacks lift toward the fog and its
+            # silhouettes (roof edges, trim) go slightly soft, so the near pine / lamp pole separate
+            dark = C.smoothstep(0.35, 0.05, lum) * C.smoothstep(38.0, 50.0, z)
+            cv.rgb = (cv.rgb + (haze - cv.rgb) * (0.15 * dark)[..., None]).astype(np.float32)
+            sb = 1.3 * self.s
+            kb = C.smoothstep(40.0, 52.0, cv2.dilate(z, np.ones((5, 5), np.uint8)))[..., None]
+            rgb_b = cv2.GaussianBlur(cv.rgb, (0, 0), sb)
+            a_b = cv2.GaussianBlur(cv.a, (0, 0), sb)
+            cv.rgb = (cv.rgb * (1 - kb) + rgb_b * kb).astype(np.float32)
+            cv.a = (cv.a * (1 - kb[..., 0]) + a_b * kb[..., 0]).astype(np.float32)
+
     def _crop(self, cv):
         a = cv.a
         ys, xs = np.nonzero(a > 0.002)
@@ -354,7 +398,9 @@ class Scene:
         PW = self.PW
         img = R4.soft_night_clouds(img, self.cam.cy, self.s,
                                    glow_centres=((0.78 * PW, 1.0, 0.22 * PW), (0.45 * PW, 0.7, 0.2 * PW), (0.2 * PW, 0.45, 0.12 * PW)))
-        return img + CL.night_glow(self.PW, self.PH, self.cam.cy, self.cam.f, self.s)
+        img = img + CL.night_glow(self.PW, self.PH, self.cam.cy, self.cam.f, self.s)
+        # round 5: hand-painted glowing overcast (vertical gradient, flat band masses, town scatter)
+        return R5.painted_overcast(img, self.cam.cy, self.s, amount=0.78)
 
     def _far_scene(self):
         cam, cv, s = self.cam, self.far, self.s
@@ -505,7 +551,7 @@ class Scene:
         pts = cam.pts(np.array(roofp))
         x0, y0_, m = L.poly_local(pts)
         hh = m.shape[0]
-        g = np.linspace(1.0, 0.8, hh, dtype=np.float32)[:, None, None]
+        g = np.linspace(1.0, 0.95, hh, dtype=np.float32)[:, None, None]
         snow_roof = np.array([0.52, 0.62, 0.9], np.float32)
         cv.paint(x0, y0_, m, fogc(snow_roof) * g * np.ones((1, m.shape[1], 1), np.float32), Z)
         # rounded snow overhang along the eave
@@ -515,7 +561,7 @@ class Scene:
         bot = np.stack([xs, eave_y + 0.05 - 0.1 * np.abs(np.sin(xs * 1.3 + seed)) ** 3, np.full(n, Z - ov - 0.05)], 1)
         x0, y0_, m = L.poly_local(cam.pts(np.concatenate([top, bot[::-1]])))
         hh = m.shape[0]
-        g = np.linspace(1.0, 0.65, hh, dtype=np.float32)[:, None, None]
+        g = np.where(np.linspace(0, 1, hh, dtype=np.float32) < 0.3, 1.0, 0.62).astype(np.float32)[:, None, None]
         cv.paint(x0, y0_, m, fogc(snow_roof * 0.95) * g * np.ones((1, m.shape[1], 1), np.float32), Z - ov)
         lw = max(cam.f * 0.06 / Z, 0.6 * s)
         # crisp lit rim along the snow edge and the ridge (sky light), dark gutter under the eave
@@ -575,7 +621,7 @@ class Scene:
             ybot = ytop - 0.5 + 0.08 * np.abs(np.sin(tt * 7 + seed)) ** 2
             P = np.concatenate([np.stack([xs_, ytop, np.full(n, Z - ov)], 1), np.stack([xs_[::-1], ybot[::-1], np.full(n, Z - ov)], 1)])
             x0, y0_, m = L.poly_local(cam.pts(P))
-            vv = np.linspace(1.05, 0.72, m.shape[0], dtype=np.float32)[:, None, None]
+            vv = np.where(np.linspace(0, 1, m.shape[0], dtype=np.float32) < 0.35, 1.02, 0.68).astype(np.float32)[:, None, None]
             cv.paint(x0, y0_, m, fogc(snow) * vv * np.ones((1, m.shape[1], 1), np.float32), Z - ov)
             x0, y0_, m = L.line_local(cam.pts(np.stack([xs_, ytop, np.full(n, Z - ov - 0.02)], 1)), max(cam.f * 0.06 / Z, 0.6 * s))
             cv.paint(x0, y0_, m * 0.9, fogc(snow * 1.35), Z - ov - 0.02)
@@ -628,6 +674,7 @@ class Scene:
         Pw = np.stack([X, np.full_like(X, Y_PLAT), Z], -1)
         Nup = np.array([0, 1, 0], np.float32)
         E = (self.light_at(Pw, Nup, vis0=self.sign_shadow(X, Z)) + self.door_light(X, Z) + self.window_light(X, Z)) * 0.72
+        E = paint_E(E, step=2.1, soft=0.14, mix=0.6)       # painted warm pool plateaus, not a CG falloff
         under = ((X > CAN_X0 - 0.2) & (X < CAN_X1) & (Z > CAN_Z0 - 0.3) & (Z < CAN_Z1 + 0.3)).astype(np.float32)
         under = C.blur(under, 2.0 * s)
         # canopy occlusion of the sky ambient, drifting snow reaching in at the canopy edges
@@ -687,12 +734,15 @@ class Scene:
             snow_col = C.lerp(snow_col, shd_col, k[..., None])
         # footprints: the lamp light cannot reach into the prints -> cool blue-violet hollows with a lit
         # crescent on the far wall
-        pk = (fp[0] * (1 - 0.8 * fp[1]))[..., None]
-        hollow = snow_col * np.array([0.5, 0.5, 0.76], np.float32) + AMB_SNOW * np.array([0.04, 0.03, 0.14], np.float32)
-        rimc = snow_lit(amb * alb_snow, E * alb_snow * 1.3, 1.1)
-        snow_col = C.lerp(snow_col, snow_col * 1.07 + E * 0.05, (fp[2] * 0.8)[..., None])
+        # (cycle 7) painted prints: a mid cool hollow, ONE darker cool shadow value on the far inner wall
+        # (it faces away from the lamps), and a lit crescent on the near lip
+        pk = fp[0][..., None]
+        hollow = snow_col * np.array([0.66, 0.64, 0.84], np.float32) + AMB_SNOW * np.array([0.03, 0.02, 0.1], np.float32)
+        wallc = snow_col * np.array([0.4, 0.4, 0.66], np.float32) + AMB_SNOW * np.array([0.02, 0.01, 0.08], np.float32)
+        rimc = snow_lit(amb * alb_snow, E * alb_snow * 1.35, 1.1)
         snow_col = C.lerp(snow_col, hollow, np.clip(pk * 1.05, 0, 1))
-        snow_col = C.lerp(snow_col, rimc * 1.08, (fp[1] * 0.75)[..., None])
+        snow_col = C.lerp(snow_col, wallc, (fp[1] * 0.85)[..., None])
+        snow_col = C.lerp(snow_col, rimc * 1.1, (fp[2] * 0.8)[..., None])
         # concrete under the canopy (wet, dark, reflective)
         conc = np.array([0.25, 0.22, 0.2], np.float32) * (0.8 + 0.4 * t1[..., None])
         # each canopy tube throws its own soft oval pool onto the concrete below it
@@ -858,7 +908,11 @@ class Scene:
             tt = np.linspace(0, 1, 400)
             P = (1 - tt)[:, None] ** 2 * p0 + 2 * ((1 - tt) * tt)[:, None] * p1 + (tt * tt)[:, None] * p2
             seg = np.r_[0, np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))]
-            for k, sl in enumerate(np.arange(0.15, seg[-1] - 0.1, step)):
+            # (cycle 7) uneven stride: a real walk, not a stamped row
+            sls = [0.15]
+            while sls[-1] < seg[-1] - 0.1 - step:
+                sls.append(sls[-1] + step * rng.uniform(0.72, 1.3))
+            for k, sl in enumerate(sls):
                 t = float(np.interp(sl, seg, tt))
                 p = (1 - t) ** 2 * p0 + 2 * (1 - t) * t * p1 + t * t * p2
                 dp = 2 * (1 - t) * (p1 - p0) + 2 * t * (p2 - p1)
@@ -868,14 +922,15 @@ class Scene:
                 ang = -side * rng.uniform(0.08, 0.2)                  # toes turned slightly out
                 ca, sa = math.cos(ang), math.sin(ang)
                 d2 = np.array([dp[0] * ca - dp[1] * sa, dp[0] * sa + dp[1] * ca])
-                prints.append((p + nrm * side * 0.095 + rng.normal(0, 0.012, 2), d2, rng.uniform(0.85, 1.0)))
+                prints.append((p + nrm * side * rng.uniform(0.07, 0.12) + rng.normal(0, 0.015, 2), d2, rng.uniform(0.7, 1.0),
+                               rng.uniform(0, 6.28, 3), rng.uniform(0.9, 1.15)))
         sel0 = (Z > -1) & (Z < 19) & (X > -4.8) & (X < 2.0)
         ii = np.nonzero(sel0)
         Xa, Za = X[ii], Z[ii]
         depa = np.zeros_like(Xa)
         walla = np.zeros_like(Xa)
         rima = np.zeros_like(Xa)
-        for (c, dv, depth) in prints:
+        for (c, dv, depth, ph, ln) in prints:
             ex, ez = Xa - c[0], Za - c[1]
             near = (np.abs(ex) < 0.35) & (np.abs(ez) < 0.35)
             if not near.any():
@@ -884,16 +939,19 @@ class Scene:
             ex, ez = ex[j], ez[j]
             a_ = ex * dv[1] - ez * dv[0]          # across the boot
             b_ = ex * dv[0] + ez * dv[1]          # along the boot (toe +)
-            sole = np.sqrt((a_ / 0.056) ** 2 + ((b_ - 0.055) / 0.11) ** 2)
-            heel = np.sqrt((a_ / 0.047) ** 2 + ((b_ + 0.13) / 0.047) ** 2)
+            sole = np.sqrt((a_ / 0.05) ** 2 + ((b_ - 0.06) / (0.14 * ln)) ** 2)
+            heel = np.sqrt((a_ / 0.045) ** 2 + ((b_ + 0.14 * ln) / 0.05) ** 2)
             d = np.minimum(sole, heel * 1.04)
+            # crumbly, irregular outline (snow breaks unevenly at the edge of a print)
+            d = d + 0.07 * np.sin(a_ * 95 + ph[0]) * np.sin(b_ * 70 + ph[1]) + 0.05 * np.sin(b_ * 160 + a_ * 40 + ph[2])
             # deeper toward the toe / heel centres, soft crumbly edge
             m = C.smoothstep(1.15, 0.65, d) * depth * (0.75 + 0.25 * C.smoothstep(0.9, 0.3, d))
             depa[j] = np.maximum(depa[j], m)
             # the inner wall on the far side (facing the camera) catches the light
-            walla[j] = np.maximum(walla[j], C.smoothstep(1.12, 0.9, d) * C.smoothstep(0.0, 0.05, ez) * depth)
+            walla[j] = np.maximum(walla[j], C.smoothstep(0.35, 0.8, d) * C.smoothstep(1.12, 0.95, d) * C.smoothstep(-0.01, 0.06, ez) * depth)
             # little ridge of kicked-up snow round the print (strongest at the toe)
-            rr = C.smoothstep(1.05, 1.2, d) * C.smoothstep(1.7, 1.25, d) * (0.5 + 0.5 * C.smoothstep(-0.05, 0.12, b_))
+            rr = C.smoothstep(1.0, 1.12, d) * C.smoothstep(1.55, 1.2, d) * (0.5 + 0.5 * C.smoothstep(-0.05, 0.12, b_))
+            rr = rr * C.smoothstep(0.03, -0.04, ez)        # (cycle 7) the NEAR lip faces the lamps -> lit
             rima[j] = np.maximum(rima[j], rr * depth)
         dep[ii] = depa
         wall[ii] = walla
@@ -1173,15 +1231,16 @@ class Scene:
         n = 30
         xs = np.linspace(x0w - 0.08, x1w + 0.06, n)
         tt = np.linspace(0, 1, n)
-        ytop = y1 + 0.05 + 0.22 * np.sin(np.pi * tt) ** 0.45 + 0.02 * np.sin(tt * 17)
+        ytop = y1 + 0.05 + 0.17 * np.clip(np.sin(np.pi * tt) * 1.6, 0, 1) ** 0.5 + 0.015 * np.sin(tt * 17)
         ybot = y1 - 0.06 - 0.05 * np.abs(np.sin(tt * 5.0 + 1)) ** 3
         P = np.concatenate([np.stack([xs, ytop, np.full(n, z0 - 0.06)], 1), np.stack([xs[::-1], ybot[::-1], np.full(n, z0 - 0.06)], 1)])
         X0, Y0, m = L.poly_local(cam.pts(P))
         hh = m.shape[0]
         vv = np.linspace(0, 1, hh, dtype=np.float32)[:, None, None]
-        top_c = AMB_SNOW * 1.55 + Ef * 0.4
-        und = AMB_SNOW * np.array([0.55, 0.62, 0.9], np.float32) + Ef * 0.35
-        cc = top_c * (1 - vv) + und * vv
+        top_c = AMB_SNOW * 1.5 + Ef * 0.4
+        und = AMB_SNOW * np.array([0.62, 0.66, 0.95], np.float32) + Ef * 0.3
+        kk = C.smoothstep(0.5, 0.54, vv)
+        cc = top_c * (1 - kk) + und * kk
         cv.paint(X0, Y0, m, fogc(cc * np.ones((1, m.shape[1], 1), np.float32)), z0 - 0.06)
         # lamp-side rim of the cap
         rim = np.stack([xs[: n // 2], ytop[: n // 2], np.full(n // 2, z0 - 0.07)], 1)
@@ -1457,12 +1516,40 @@ class Scene:
         cc = col[y0:y1, x0:x1] if (isinstance(col, np.ndarray) and col.ndim == 3) else col
         cv.paint(x0, y0, a[y0:y1, x0:x1], cc, Z[y0:y1, x0:x1] if isinstance(Z, np.ndarray) else Z)
 
+    def _hand_paint_wall(self, col, m, pool, shade_col, sig=7.0):
+        """Hand-painted wall (round 5): outside the warm light pool the wall is ONE flat cool shade value
+        (texture suppressed); the plank / brick detail is only allowed to read inside the pool."""
+        ys, xs = np.nonzero(m)
+        if len(ys) == 0:
+            return col
+        pad = int(4 * sig * self.s) + 2
+        y0, y1 = max(ys.min() - pad, 0), min(ys.max() + pad + 1, m.shape[0])
+        x0, x1 = max(xs.min() - pad, 0), min(xs.max() + pad + 1, m.shape[1])
+        mf = m[y0:y1, x0:x1].astype(np.float32)
+        c = np.nan_to_num(col[y0:y1, x0:x1]).astype(np.float32)
+        sg = sig * self.s
+        den = np.maximum(cv2.GaussianBlur(mf, (0, 0), sg), 1e-3)[..., None]
+        cs = cv2.GaussianBlur(c * mf[..., None], (0, 0), sg) / den
+        pk = np.clip(pool[y0:y1, x0:x1], 0, 1)[..., None]
+        lit = cs + (c - cs) * (0.35 + 0.65 * pk)
+        # (cycle 7) the cool shade side is no longer a dead flat fill: it keeps the painted board /
+        # grain / streak pattern as a relative value modulation, and is lifted a little so it reads
+        ratio = np.clip(c.mean(-1, keepdims=True) / np.maximum(cs.mean(-1, keepdims=True), 1e-4), 0.35, 1.8)
+        shade = np.asarray(shade_col, np.float32) * 1.55 * (1 + 0.75 * (ratio - 1))
+        # a broad warm spill gradient bridges the pool and the shade (no hard CG falloff)
+        spill = np.clip(cv2.GaussianBlur(pk[..., 0], (0, 0), 38 * self.s + 1) * 1.6, 0, 1)[..., None]
+        shade = shade * (1 - 0.6 * spill) + shade * np.array([2.1, 1.45, 0.85], np.float32) * 0.6 * spill
+        out = lit * pk + shade * (1 - pk)
+        col = col.copy()
+        col[y0:y1, x0:x1] = np.where(mf[..., None] > 0, out, c)
+        return col
+
     def _building(self, cv):
         cam, s = self.cam, self.s
         # side wall x = BLD_X1 (faces +x, toward the track)
         m, X, Y, Z = self._plane_region('x', BLD_X1, ((-99, 99), (Y_PLAT, CAN_Y), (BLD_Z0, BLD_Z1)))
         P = np.stack([np.full_like(X, BLD_X1), Y, Z], -1)
-        E = self.light_at(P, np.array([1, 0, 0], np.float32))
+        E = paint_E(self.light_at(P, np.array([1, 0, 0], np.float32)), step=2.0, soft=0.12, mix=0.75)
         tex = self._snow_tex(Z * 3, Y * 0.2, 9, 0.05)
         plank = self._clapboard(Y, Z)
         streak = self._snow_tex(Z * 7.0, Y * 0.35, 23, 0.05)
@@ -1480,6 +1567,18 @@ class Scene:
         wood = R4.apply_weather(wood * 1.45, wm_, ws_)
         bounce = C.smoothstep(Y_PLAT + 1.6, Y_PLAT, Y)[..., None]
         col = wood * (AMB_SNOW * (0.95 + 0.7 * bounce) + E * 0.9)
+        # round 5: warm light pool that falls off from the lit windows and the lamps, flat cool shade
+        glow = np.zeros_like(Z)
+        for (za, zb) in ((19.2, 21.6), (22.4, 24.8), (26.0, 28.2)):
+            dz = np.maximum(np.maximum(za - Z, Z - zb), 0)
+            dy = np.maximum(np.maximum(Y_PLAT + 1.0 - Y, Y - (Y_PLAT + 2.3)), 0)
+            glow = np.maximum(glow, np.exp(-(np.sqrt(dz ** 2 + dy ** 2 * 2.2) / 0.42) ** 1.4))
+        jit = 0.06 * np.sin(Y * 6.0 + Z * 2.3)
+        pool = C.smoothstep(0.25, 0.6, np.clip(C.smoothstep(0.3, 1.4, E.mean(-1)) + 0.9 * glow + jit, 0, 1.5))
+        col = col + wood * WIN[None, None] * (0.35 * glow)[..., None]
+        base_w = np.array([0.3, 0.2, 0.14], np.float32) * 1.45
+        shade_c = base_w * AMB_SNOW * 0.9 + np.array([0.004, 0.008, 0.03], np.float32)
+        col = self._hand_paint_wall(col, m, pool, shade_c)
         # windows (warm, frosted, curtains)
         for (za, zb) in ((19.2, 21.6), (22.4, 24.8), (26.0, 28.2)):
             wm = (Z > za) & (Z < zb) & (Y > Y_PLAT + 1.0) & (Y < Y_PLAT + 2.3)
@@ -1531,7 +1630,7 @@ class Scene:
         # front wall z = BLD_Z0 (faces the camera) with a lit sliding door
         m, X, Y, Z = self._plane_region('z', BLD_Z0, ((CAN_X0, BLD_X1), (Y_PLAT, CAN_Y), (0, 99)))
         P = np.stack([X, Y, Z], -1)
-        E = self.light_at(P, np.array([0, 0, -1], np.float32))
+        E = paint_E(self.light_at(P, np.array([0, 0, -1], np.float32)), step=2.0, soft=0.12, mix=0.75)
         tex = self._snow_tex(X * 3, Y * 0.3, 10, 0.05)
         bounce = C.smoothstep(Y_PLAT + 1.6, Y_PLAT, Y)[..., None]
         streak = self._snow_tex(X * 7.0, Y * 0.35, 25, 0.05)
@@ -1543,6 +1642,19 @@ class Scene:
         col = col * TX.grime(X, Y - Y_PLAT, CAN_Y - Y_PLAT, 0.0, seed=34, openings=[(-5.1, -3.7, 2.1), (-5.0, -3.8, 2.22), (-3.66, -3.36, 1.02)])[..., None]
         wm_, ws_ = R4.wall_weather(X * 1.3 + 3.0, Y - Y_PLAT, CAN_Y - Y_PLAT, ppm, seed=62)
         col = R4.apply_weather(col * 2.3, wm_, ws_) + np.array([0.014, 0.014, 0.034], np.float32)
+        # hand-painted warm/cool split: the left platform lamp throws a warm, soft-edged oval pool low
+        # across the facade; above and to the right the wall stays in one cool blue shade value
+        jit = 0.08 * np.sin(Y * 7.0 + X * 3.0)
+        dpool = np.sqrt(((X + 5.2) / 1.9) ** 2 + ((Y - (Y_PLAT + 0.55)) / 1.25) ** 2) + jit
+        pool = C.smoothstep(1.0, 0.82, dpool)
+        shade = 1 - pool
+        col = col * (1 + pool[..., None] * np.array([1.5, 0.95, 0.35], np.float32))             + shade[..., None] * np.array([0.0, 0.006, 0.02], np.float32)
+        # round 5: brick / plank detail only inside the lamp pool + door spill; one flat cool value elsewhere
+        dd_ = np.sqrt((np.maximum(np.maximum(-5.1 - X, X + 3.7), 0)) ** 2 + np.maximum(Y - (Y_PLAT + 2.05), 0) ** 2)
+        pool2 = np.clip(pool + 0.8 * np.exp(-(dd_ / 0.5) ** 1.4), 0, 1)
+        base_f = np.array([0.3, 0.21, 0.14], np.float32) * 2.3
+        col = self._hand_paint_wall(col, m, C.smoothstep(0.15, 0.6, pool2),
+                                    base_f * AMB_SNOW * 0.55 + np.array([0.014, 0.016, 0.04], np.float32))
         door = (X > -5.1) & (X < -3.7) & (Y < Y_PLAT + 2.05)
         dg = (X > -5.0) & (X < -3.8) & (Y < Y_PLAT + 1.95) & (Y > Y_PLAT + 0.15)
         col = np.where(door[..., None], np.array([0.12, 0.09, 0.07], np.float32), col)
@@ -1644,6 +1756,11 @@ class Scene:
             col = col + (0.35 / (d2 + 0.4))[..., None] * np.array([0.6, 0.4, 0.2], np.float32) * (~hit)[..., None]
         return col.astype(np.float32)
 
+    def _paste(self, cv, P4, tex, z):
+        """World quad (bl, br, tr, tl) textured with tex (top row = tl..tr)."""
+        tex = np.ascontiguousarray(tex, np.float32)
+        PT.paste_quad(cv, self.cam.pts(np.array(P4, np.float64)), tex, z)
+
     def _clapboard(self, Y, Z):
         """Horizontal clapboard siding: each board lit on its lower lip, dark shadow line under it."""
         per = 0.19
@@ -1679,8 +1796,8 @@ class Scene:
             top = np.stack([xs, Y_PLAT + hgt + 0.1 * np.sin(np.linspace(0, np.pi, n)) ** 0.6, np.full(n, z0 - 0.02)], 1)
             bot = np.stack([xs, np.full(n, Y_PLAT + hgt - 0.03), np.full(n, z0 - 0.02)], 1)
             x0, y0, mm = L.poly_local(self.cam.pts(np.concatenate([top, bot[::-1]])))
-            vv = np.linspace(1.0, 0.0, mm.shape[0], dtype=np.float32)[:, None, None]
-            cc = (AMB_SNOW * (0.8 + 0.8 * vv) + E * (0.4 + 0.6 * (1 - vv))) * np.ones((1, mm.shape[1], 1), np.float32)
+            vv = np.where(np.linspace(0, 1, mm.shape[0], dtype=np.float32) < 0.45, 1.0, 0.0).astype(np.float32)[:, None, None]
+            cc = (AMB_SNOW * (0.85 + 0.7 * vv) + E * (0.45 + 0.4 * vv)) * np.ones((1, mm.shape[1], 1), np.float32)
             cv.paint(x0, y0, mm, cc.astype(np.float32), z0 - 0.02)
 
     def _bench(self, cv, z0=19.4, z1=21.8):
@@ -1747,57 +1864,48 @@ class Scene:
         rng = np.random.default_rng(66)
 
         def pillow(xa, xb, ybase, hgt, zc, za, zb, lit_col, shd_col, n=60, lip=0.05):
-            """Clean pillowy snow cap along z (seen from the camera side): a smooth rounded top that
-            follows the slats (faint grooves), a crisp overhang lip curling past the front edge, a blue
-            shadowed underside, and a thin cast shadow on the wood right under the lip."""
+            """Painted snow SLAB on the seat (round 5): one flat pale top plane, one flat cool front face,
+            a hard lit top edge, squared (slightly broken) ends and a few small drip overhangs - no
+            rounded cushion, no gradient, no bevel."""
             zs = np.linspace(za, zb, n)
             tt = (zs - za) / (zb - za)
-            end = np.clip(np.minimum(tt, 1 - tt) / rng.uniform(0.05, 0.12), 0, 1) ** 0.45
-            lum_ = np.zeros(n)
-            for _ in range(5):
-                c_ = rng.uniform(0, 1)
-                lum_ += rng.uniform(-0.25, 0.3) * np.exp(-((tt - c_) / rng.uniform(0.05, 0.2)) ** 2)
-            bump = hgt * np.clip(0.85 + lum_ + 0.04 * np.sin(zs * 9.1 + rng.uniform(0, 6)), 0.35, 1.3)
-            ytop = ybase + bump * end
+            # squared ends: the slab stops almost vertically, with a tiny chipped corner
+            end = np.ones(n)
+            jag = rng.uniform(-1, 1, n)
+            jag = np.convolve(jag, np.ones(3) / 3, mode='same')
+            ytop = ybase + hgt * (0.92 + 0.08 * jag) * end
             back = np.stack([np.full(n, xa), ytop, zs], 1)
-            front = np.stack([np.full(n, xb + 0.02), ytop - hgt * 0.12, zs], 1)
+            front = np.stack([np.full(n, xb + 0.02), ytop, zs], 1)
             X0, Y0, m = L.poly_local(cam.pts(np.concatenate([back, front[::-1]])), ss=4)
-            vv = np.linspace(0, 1, m.shape[0], dtype=np.float32)[:, None, None]
-            hh_, ww_ = m.shape
-            # soft painted top: faint wind ripples + cooler hollows between the lumps, lit toward the lamp
-            nzr = cv2.GaussianBlur(rng.random((hh_, ww_)).astype(np.float32), (0, 0), sigmaX=max(ww_ * 0.03, 1.0), sigmaY=max(hh_ * 0.15, 0.8))
-            nzr = ((nzr - nzr.mean()) / (nzr.std() + 1e-6))[..., None]
-            ux = np.linspace(0, 1, ww_, dtype=np.float32)[None, :, None]
-            topc = lit_col * (1.0 + 0.05 * nzr) * (0.93 + 0.1 * ux)
-            topc = topc * (1 - 0.25 * vv) + shd_col * 0.25 * vv * 0.0 + (lit_col * 0.75 + shd_col * 0.25) * 0.25 * vv
-            cv.paint(X0, Y0, m, (topc * np.ones((1, ww_, 1), np.float32)).astype(np.float32), zc)
-            # rounded front bulge + overhang lip (even, slightly scalloped), lit top -> blue underside
+            cv.paint(X0, Y0, m, lit_col, zc)
+            # near end face (faces the camera / the foreground lamp): one flat mid value
+            h0 = float(ytop[0] - ybase)
+            self.quad(cv, [(xa, ybase - lip * 0.35, za), (xb + 0.022, ybase - lip * 0.35, za), (xb + 0.02, ybase + h0, za),
+                           (xa, ybase + h0, za)], lit_col * 0.3 + shd_col * 0.7, za - 0.01)
+            # front face: vertical, ONE flat cool value, a few small drips hanging past the slat edge
             drp = np.zeros(n)
-            for _ in range(6):
-                c_ = rng.uniform(0.05, 0.95)
-                drp += rng.uniform(0.3, 1.2) * np.exp(-((tt - c_) / rng.uniform(0.02, 0.08)) ** 2)
-            lipd = (lip * (0.55 + 0.35 * np.sin(zs * 3.7 + rng.uniform(0, 6)) ** 2) + lip * 0.9 * np.clip(drp, 0, 1.3)) * end
-            ft = np.stack([np.full(n, xb + 0.02), ytop - hgt * 0.12, zs], 1)
-            fb = np.stack([np.full(n, xb + 0.045), ybase - lipd, zs], 1)
+            for _ in range(5):
+                c_ = rng.uniform(0.08, 0.92)
+                drp += rng.uniform(0.5, 1.0) * np.exp(-((tt - c_) / rng.uniform(0.01, 0.025)) ** 2)
+            lipd = (lip * 0.35 + lip * 1.1 * np.clip(drp, 0, 1)) * (end > 0.99)
+            ft = np.stack([np.full(n, xb + 0.02), ytop, zs], 1)
+            fb = np.stack([np.full(n, xb + 0.022), np.minimum(ybase - lipd, ytop - 0.005), zs], 1)
             X0, Y0, m = L.poly_local(cam.pts(np.concatenate([ft, fb[::-1]])), ss=4)
-            vv = np.linspace(0, 1, m.shape[0], dtype=np.float32)[:, None, None]
-            st_ = np.clip((vv - 0.32) / 0.3, 0, 1) ** 0.8
-            deep = np.clip((vv - 0.75) / 0.25, 0, 1)
-            cc = lit_col * (1 - st_) * (1 - 0.12 * vv) + shd_col * st_ * (1 - 0.35 * deep) + np.array([0.04, 0.0, 0.06], np.float32) * deep
-            cv.paint(X0, Y0, m, (cc * np.ones((1, m.shape[1], 1), np.float32)).astype(np.float32), zc - 0.05)
-            # cast shadow of the lip on the slat face below it
-            sb = np.stack([np.full(n, xb + 0.005), ybase - lipd - 0.035 * end, zs], 1)
+            cv.paint(X0, Y0, m, shd_col, zc - 0.05)
+            # thin flat cast shadow of the slab on the slat face right under it
+            sb = np.stack([np.full(n, xb + 0.005), ybase - lipd - 0.02 * end, zs], 1)
             st2 = np.stack([np.full(n, xb + 0.005), ybase - lipd * 0.5, zs], 1)
             X0, Y0, m = L.poly_local(cam.pts(np.concatenate([st2, sb[::-1]])), ss=4)
-            cv.paint(X0, Y0, m * 0.6, AMB_SNOW * np.array([0.18, 0.2, 0.42], np.float32), zc - 0.04)
-            # crisp rim along the top-front edge
-            X0, Y0, m = L.line_local(cam.pts(ft), max(cam.f * 0.01 / zc, 0.7 * s))
-            cv.paint(X0, Y0, m * 0.9, lit_col * 1.28 + np.array([0.08, 0.05, 0.02], np.float32), zc - 0.06)
+            cv.paint(X0, Y0, m * 0.5, AMB_SNOW * np.array([0.18, 0.2, 0.42], np.float32), zc - 0.04)
+            # hard lit edge along the top-front corner
+            X0, Y0, m = L.line_local(cam.pts(ft), max(cam.f * 0.008 / zc, 0.7 * s))
+            cv.paint(X0, Y0, m, lit_col * 1.2 + np.array([0.06, 0.04, 0.02], np.float32), zc - 0.06)
         self._drift_along(cv, x1w + 0.04, z1 + 0.05, x1w + 0.04, z0 - 0.02, 0.05, 81, zdraw=(z0 + z1) / 2 - 0.1)
         self._drift_along(cv, x0w - 0.1, z0 - 0.1, x1w + 0.1, z0 - 0.1, 0.07, 82, zdraw=z0 - 0.15)
         lit = snow_lit(AMB_SNOW * 1.15, E_top[None] * 0.8)[0]
+        lit = lit * 1.12 + np.array([0.05, 0.05, 0.05], np.float32)     # (c7) flat, no sheen; round 5: the top plane is the palest value
         shd = AMB_SNOW * np.array([0.55, 0.62, 0.95], np.float32) + E_front * 0.25
-        shd = AMB_SNOW * np.array([0.5, 0.5, 0.92], np.float32) + np.array([0.03, 0.0, 0.05], np.float32) + E_front * 0.18
+        shd = AMB_SNOW * np.array([0.62, 0.6, 0.86], np.float32) + np.array([0.03, 0.02, 0.04], np.float32) + E_front * 0.16
         pillow(x0w + 0.04, x1w, ys, 0.07, (z0 + z1) / 2, z0 - 0.02, z1 + 0.02, lit, shd, lip=0.04)
         pillow(x0w - 0.02, x0w + 0.07, ys + 0.48, 0.045, (z0 + z1) / 2, z0, z1, lit * 1.02, shd, lip=0.022)
 
@@ -1845,15 +1953,36 @@ class Scene:
         stain = self._snow_tex(X * 1.2, Z * 1.2, 26, 0.05)
         base = np.array([0.18, 0.15, 0.14], np.float32) * (0.85 + 0.3 * tex[..., None]) * panel[..., None]
         base = base * (boards * (0.85 + 0.3 * stain))[..., None]
-        col = base * (AMB_SNOW * 0.12 + E) + np.array([0.06, 0.035, 0.015], np.float32) * C.smoothstep(30, 17, Z)[..., None]
+        # (cycle 7) warm bounce off the lit platform snow under each tube, fading into a cool shade
+        # toward the open end; painted board seams stay readable in both
+        bnc = np.zeros(X.shape, np.float32)
+        for (lp, col_, I, cone, cpow, _) in self.lamps:
+            if lp[1] > 1.0 and CAN_Z0 < lp[2] < CAN_Z1:
+                bnc += np.exp(-(((X - lp[0]) / 1.6) ** 2 + ((Z - lp[2]) / 2.2) ** 2))
+        bnc = np.clip(bnc, 0, 1.2)
+        seam = 1 - 0.35 * C.smoothstep(0.93, 0.99, np.cos(X / 0.24 * 2 * np.pi))
+        base = base * seam[..., None]
+        col = (base * (AMB_SNOW * 0.42 + E) + np.array([0.06, 0.035, 0.015], np.float32) * C.smoothstep(30, 17, Z)[..., None]
+               + base * bnc[..., None] * np.array([0.95, 0.6, 0.3], np.float32) * 0.9)
         fa = self.fog_amt(Z)[..., None]
         col = col * (1 - fa) + FOG * fa
         self._paint_region(cv, m, col, Z)
         # transverse beams (front face visible)
-        for zb in (CAN_Z1 - 0.2, 23.5 + 2.2, 21.2, 18.6):
+        tubes = [lp for (lp, _c, _I, _cn, _cp, _s) in self.lamps if lp[1] > 1.0 and CAN_Z0 < lp[2] < CAN_Z1]
+        for k, zb in enumerate((CAN_Z1 - 0.2, 23.5 + 2.2, 21.2, 18.6)):
             E = self.light_at(np.array([[0.0, CAN_Y - 0.15, zb - 0.1]], np.float32), np.array([0, 0, -1], np.float32))[0]
-            self.quad(cv, [(CAN_X0, CAN_Y, zb), (CAN_X1, CAN_Y, zb), (CAN_X1, CAN_Y - 0.22, zb), (CAN_X0, CAN_Y - 0.22, zb)],
-                      np.array([0.2, 0.16, 0.14], np.float32) * (AMB_SNOW * 0.15 + E * 1.2 + 0.02), zb)
+            # (cycle 7) painted timber beam: grain + weathering, a warm bounce lip picked up from the
+            # nearest tubes (strongest on the bottom edge), cool shade elsewhere
+            tex = T2.painted_wood(640, 24, CAN_X1 - CAN_X0, 0.22, seed=140 + k, base=(0.3, 0.22, 0.16))
+            xw = np.linspace(CAN_X0, CAN_X1, 640, dtype=np.float32)[None, :]
+            yv = np.linspace(0, 1, 24, dtype=np.float32)[:, None]          # 0 top .. 1 bottom
+            wb = np.zeros_like(xw)
+            for lp in tubes:
+                wb = wb + np.exp(-((xw - lp[0]) / 1.8) ** 2 - ((zb - lp[2]) / 3.0) ** 2)
+            wb = np.clip(wb, 0, 1.2) * (0.35 + 0.65 * yv)
+            lt = AMB_SNOW * 0.42 + E * 1.1 + wb[..., None] * np.array([1.1, 0.7, 0.36], np.float32) * 0.9
+            self._paste(cv, [(CAN_X0, CAN_Y - 0.22, zb), (CAN_X1, CAN_Y - 0.22, zb), (CAN_X1, CAN_Y, zb), (CAN_X0, CAN_Y, zb)],
+                        tex * lt, zb)
         # canopy lamps: fluorescent-like fixtures
         for (lp, col, I, cone, cpow, _) in self.lamps:
             if lp[1] > 1.0 and CAN_Z0 < lp[2] < CAN_Z1:
@@ -1870,8 +1999,19 @@ class Scene:
         # front fascia + snow slab + icicles
         z = CAN_Z0
         E = self.light_at(np.array([[0.0, CAN_Y + 0.2, z - 0.1]], np.float32), np.array([0, 0, -1], np.float32))[0]
-        self.quad(cv, [(CAN_X0, CAN_Y - 0.05, z), (CAN_X1, CAN_Y - 0.05, z), (CAN_X1, CAN_Y + 0.35, z), (CAN_X0, CAN_Y + 0.35, z)],
-                  np.array([0.55, 0.52, 0.5], np.float32) * (AMB_SNOW * 0.3 + E * 0.9), z)
+        # (cycle 7) painted fascia board: plank seams + weathering streaks, the main lamp's warm spill
+        # on its right end breaking into cool blue shade toward the left
+        tex = T2.painted_wood(900, 40, CAN_X1 - CAN_X0, 0.4, seed=150, base=(0.42, 0.38, 0.36))
+        xw = np.linspace(CAN_X0, CAN_X1, 900, dtype=np.float32)[None, :]
+        seam = 1 - 0.45 * (np.abs(np.mod(xw + 0.3, 1.8) - 0.9) > 0.885)
+        lx0 = self.lamps[0][0][0]
+        wsp = np.exp(-((xw - lx0) / 3.2) ** 2) * 0.9 + np.exp(-((xw - self.lamps[-1][0][0]) / 1.6) ** 2) * 0.5
+        lt = AMB_SNOW * 0.5 + E * 0.6 + wsp[..., None] * np.array([1.0, 0.62, 0.3], np.float32) * 0.7
+        rs = np.random.default_rng(151)
+        strk = cv2.GaussianBlur(rs.random((40, 900)).astype(np.float32), (0, 0), sigmaX=1.2, sigmaY=12)
+        strk = 1 - 0.5 * np.clip((strk - strk.mean()) / (strk.std() + 1e-6), 0, 2) * np.linspace(0.3, 1, 40, dtype=np.float32)[:, None]
+        self._paste(cv, [(CAN_X0, CAN_Y - 0.05, z), (CAN_X1, CAN_Y - 0.05, z), (CAN_X1, CAN_Y + 0.35, z), (CAN_X0, CAN_Y + 0.35, z)],
+                    tex * (seam * strk)[..., None] * lt, z)
         self._cornice(cv, z)
 
     def _cornice(self, cv, z):
@@ -1927,23 +2067,18 @@ class Scene:
         # value masses: pale sky-lit crown -> front face (lamp-lit) -> blue-violet curl-under
         rng2 = np.random.default_rng(56)
         jag = (0.06 * np.sin(uu * (0.05 / s) + 1.0) + 0.04 * np.sin(uu * (0.13 / s) + 2.0))
-        crown = 1 - C.smoothstep(0.16, 0.24, rv + jag)
-        under = C.smoothstep(0.62, 0.74, rv - jag * 0.8)
-        face = snow_lit(AMB_SNOW * 1.12 * np.ones((hh, ww, 1), np.float32), np.broadcast_to(Ew * 0.95, (hh, ww, 3)))
-        crown_c = AMB_SNOW * np.array([1.55, 1.5, 1.35], np.float32) + np.array([0.04, 0.05, 0.1], np.float32) + Ew * 0.35
-        und_c = AMB_SNOW * np.array([0.52, 0.5, 0.92], np.float32) + Ew * np.array([0.12, 0.07, 0.04], np.float32)
+        # painted as two flat planes: a pale sky-lit top plane with a crisp jagged lower edge, and ONE
+        # cool blue-violet front value (warmed only where the lamp pool actually reaches) - no bevel,
+        # no graded curl-under, no layer striping
+        crown = 1 - C.smoothstep(0.3, 0.315, rv + jag)
+        crown_c = AMB_SNOW * np.array([1.62, 1.58, 1.4], np.float32) + np.array([0.05, 0.06, 0.1], np.float32) + Ew * 0.3
+        ewb = paint_E(Ew)
+        face = np.array([0.25, 0.3, 0.5], np.float32) + ewb * np.array([0.5, 0.36, 0.22], np.float32)
+        face = np.broadcast_to(face, (hh, ww, 3))
         col = face * (1 - crown[..., None]) + crown_c * crown[..., None]
-        col = col * (1 - under[..., None]) + und_c * under[..., None]
-        # compressed-snow layer strokes following the top silhouette + fine brush grain
         grain = cv2.GaussianBlur(rng2.random((hh, ww)).astype(np.float32), (0, 0), sigmaX=7.0 * s + 1, sigmaY=0.7 * s + 0.3)
         grain = (grain - grain.mean()) / (grain.std() + 1e-6)
-        layer = 1 + 0.04 * np.sin(rv * np.pi * 9 + 1.5 * grain) * (1 - under) + 0.035 * grain
-        col = col * layer[..., None]
-        # lobe creases: darker cool seams where two drooping lobes meet, running up from the lower edge
-        dro = np.interp(uu[0], pt_top[:, 0], np.clip(droop, 0, None))
-        d2 = np.gradient(np.gradient(dro))
-        seam = np.clip(d2 / (np.abs(d2).max() + 1e-6) * 3.0, 0, 1)[None, :] * C.smoothstep(0.3, 0.9, rv)
-        col = col * (1 - 0.25 * seam[..., None])
+        col = col * (1 + 0.012 * grain)[..., None]
         cv.paint(x0, y0, mm, col.astype(np.float32), zf)
         # silhouette rims: pale cool sky rim along the top, amber rim where the lamps catch the edges
         x0r, y0r, mr = L.line_local(pt_top + [0, 0.8 * s], max(cam.f * 0.022 / z, 0.8 * s))
@@ -1954,7 +2089,7 @@ class Scene:
         Eb = self.light_at(np.stack([xs, bot, np.full(n, zf - 0.1)], 1).astype(np.float32), np.array([0, -0.3, -0.95], np.float32))
         x0b, y0b, mb = L.line_local(pt_bot - [0, 1.2 * s], max(cam.f * 0.016 / z, 0.7 * s))
         wb = np.clip(np.interp(np.arange(mb.shape[1]) + x0b, pt_bot[:, 0], Eb.mean(-1)) * 1.3, 0, 1)[None, :]
-        cv.paint(x0b, y0b, mb * 0.75 * wb, np.array([1.2, 0.72, 0.36], np.float32) * np.ones((mb.shape[0], mb.shape[1], 1), np.float32), zf - 0.012)
+        cv.paint(x0b, y0b, mb * 0.0 * wb, np.array([1.2, 0.72, 0.36], np.float32) * np.ones((mb.shape[0], mb.shape[1], 1), np.float32), zf - 0.012)
         # stable ice glints on the crown / face (tiny, warm near the lamps)
         gl = np.random.default_rng(57)
         ng = 90
@@ -1968,6 +2103,8 @@ class Scene:
         for i in range(ng):
             r = max(cam.f * gl.uniform(0.006, 0.013) / z, 0.6 * s)
             wk = float(np.clip(Eg[i] * 1.5, 0, 1))
+            if wk < 0.35 or gl.random() < 0.6:          # round 5: sparse, only in the lamp pool
+                continue
             cc = np.array([1.2, 1.3, 1.6], np.float32) * (1 - wk) + np.array([1.7, 1.4, 0.95], np.float32) * wk
             x0g, y0g, mg = L.poly_local(np.array([[ug[i] - r, vg[i]], [ug[i], vg[i] - r * 1.6], [ug[i] + r, vg[i]], [ug[i], vg[i] + r * 1.6]]), ss=4)
             cv.paint(x0g, y0g, mg * gl.uniform(0.5, 1.0), cc, zf - 0.02)
@@ -2167,8 +2304,9 @@ class Scene:
         for _ in range(7):
             c_ = rng.uniform(xs[0], xs[-1])
             lum_ += rng.uniform(-0.035, 0.05) * np.exp(-((xs - c_) / rng.uniform(0.06, 0.3)) ** 2)
-        end = np.clip(np.minimum(tt / 0.05, (1 - tt) / 0.11), 0, 1) ** 0.5
-        prof = np.clip(0.1 + lum_ + 0.006 * np.sin(xs * 23.0), 0.03, 0.2) * end
+        # (cycle 7) squared, slightly chipped ends and a near-flat top (a slab, not a cushion)
+        end = np.clip(np.minimum(tt / 0.012, (1 - tt) / 0.02), 0, 1)
+        prof = np.clip(0.1 + 0.4 * lum_ + 0.004 * np.sin(xs * 23.0), 0.05, 0.16) * end
         top = np.stack([xs, yt + 0.07 + prof * 0.85, np.full_like(xs, z - 0.05)], 1)
         drp = np.zeros(n)
         for _ in range(8):
@@ -2189,9 +2327,14 @@ class Scene:
         Et = self.light_at(np.array([[xc, yt + 0.1, z - 0.1]], np.float32))[0]
         lit_c = snow_lit(AMB_SNOW * 1.1, Et[None] * 0.8)[0]
         shd_c = AMB_SNOW * np.array([0.5, 0.52, 0.95], np.float32) + Et * 0.12
-        stp = C.smoothstep(0.55, 0.66, rv)
-        colsl = lit_c * (1.08 - 0.15 * rv[..., None]) * (1 - stp[..., None]) + shd_c * stp[..., None]
-        colsl = colsl + (lit_c * 0.35) * C.smoothstep(0.1, 0.0, rv)[..., None]
+        jg = 0.05 * np.sin(colx * 0.19 / s + 0.4)[None, :] + 0.03 * np.sin(colx * 0.47 / s)[None, :]
+        # (cycle 7) flat planes only: pale top plane | crisp lit front lip | ONE flat cool front face
+        stp = C.smoothstep(0.42, 0.44, rv + 0.5 * jg)
+        lit_c = lit_c * 1.12 + np.array([0.03, 0.04, 0.05], np.float32)
+        shd_c = AMB_SNOW * np.array([0.62, 0.62, 0.9], np.float32) + Et * 0.1
+        colsl = lit_c * (1 - stp[..., None]) + shd_c * stp[..., None]
+        lip = C.smoothstep(0.34, 0.37, rv + 0.5 * jg) * (1 - stp)
+        colsl = colsl * (1 - lip[..., None]) + (lit_c * 1.25 + np.array([0.08, 0.05, 0.02], np.float32)) * lip[..., None]
         cv.paint(x0, y0, mm, colsl.astype(np.float32), z - 0.05)
         # icicles
         ic_c0 = rng.uniform(xs[0] + 0.15, xs[-1] - 0.15, 4)
@@ -2287,20 +2430,30 @@ class Scene:
         self.vol0 = cv2.GaussianBlur(self.vol0, (0, 0), 2.5 * self.s + 0.5)
         lu, lv = self.cam.p(*self.lamps[0][0])
         us_, vs_ = C.grid(PW, PH)
+        # (cycle 7) a soft volumetric SHAFT, not a spotlight mesh: the edges feather out widely (wider
+        # blur across than along), and the density thins with distance from the head
+        dv_ = np.clip(vs_ - lv, 0, None)
+        fall = (0.35 + 0.65 * np.exp(-dv_ / (150 * self.s))).astype(np.float32)[..., None]
+        self.vol0 = cv2.GaussianBlur(self.vol0 * fall, (0, 0), sigmaX=11 * self.s + 1, sigmaY=5 * self.s + 1) * 0.72
+        # a wide, low-density light volume around the tight core (cm5_08: broad feathered cones)
+        l0p = self.lamps[0][0]
+        _, gv0 = self.cam.p(l0p[0], Y_PLAT, l0p[2])
+        self.vol0 = self.vol0 + R4.small_cone(PW, PH, lu, lv + 6 * self.s, gv0, self.s, half_ang=0.5, amber=AIR_AMBER, strength=0.5, halo=0.0)
         d2 = (us_ - lu) ** 2 + (vs_ - (lv + 4 * self.s)) ** 2
         hal = (0.35 * np.exp(-d2 / (2 * (22 * self.s) ** 2)) + 0.14 * np.exp(-d2 / (2 * (70 * self.s) ** 2))
                + 0.05 * np.exp(-d2 / (2 * (170 * self.s) ** 2)))
         self.vol0 = self.vol0 + hal[..., None].astype(np.float32) * AIR_AMBER
         # faint long beam volume carrying the cone all the way down into its pool on the platform
         beam = R3.long_cone(self.rx, self.ry, self.zbuf, self.lamps[0][0], CAM_X, Y_PLAT)
-        self.vol0 = self.vol0 + (beam * 0.32)[..., None] * AIR_AMBER
+        beam = cv2.GaussianBlur(beam, (0, 0), sigmaX=14 * self.s + 1, sigmaY=6 * self.s + 1)
+        self.vol0 = self.vol0 + (beam * 0.26)[..., None] * AIR_AMBER
         self.beam0 = beam
         self.vol = scatter(lambda li, p: li != 0 and p[2] < ZSPLIT)
         # round 4: the left platform lamp gets its own small amber cone + head halation
         l1 = self.lamps[-1][0]
         lu1, lv1 = self.cam.p(l1[0], l1[1] - 0.05, l1[2])
         _, gv1 = self.cam.p(l1[0], Y_PLAT, l1[2])
-        self.vol = self.vol + R4.small_cone(PW, PH, lu1, lv1, gv1, self.s, half_ang=0.42, amber=AIR_AMBER, strength=0.75)
+        self.vol = self.vol + R4.small_cone(PW, PH, lu1, lv1, gv1, self.s, half_ang=0.55, amber=AIR_AMBER, strength=0.5)
         self.vol_f = scatter(lambda li, p: li != 0 and p[2] >= ZSPLIT)
 
     # ------------------------------------------------------------------ snow flakes
@@ -2599,7 +2752,7 @@ class Scene:
         zb = np.zeros(n)
         zb[inb] = self.zbuf[vi[inb], ui[inb]]
         edge = (X > 1.55).astype(np.float32)
-        keep = inb & ~under & (zb > Z - 0.5 - 0.02 * Z) & (rng.random(n) < np.clip(E * 0.3 + 0.05 + 0.035 * edge, 0, 0.5) * np.clip(12.0 / Z, 0.15, 1.0))
+        keep = inb & ~under & (zb > Z - 0.5 - 0.02 * Z) & (rng.random(n) < np.clip(E * 0.28 - 0.04, 0, 0.4) * np.clip(12.0 / Z, 0.15, 1.0))
         Yk = np.full(int(keep.sum()), Y_PLAT + 0.01)
         # second population: the open snowfield right of the track (cool glints in the blue shadow)
         nf = 26000
@@ -2612,7 +2765,12 @@ class Scene:
         inf_ = (ufi >= 0) & (ufi < self.PW) & (vfi >= 0) & (vfi < self.PH)
         zbf = np.zeros(nf)
         zbf[inf_] = self.zbuf[vfi[inf_], ufi[inf_]]
-        keepf = inf_ & (zbf > Zf - 0.5 - 0.02 * Zf) & (rng.random(nf) < 0.3 * np.clip(9.0 / Zf, 0.15, 1.0))
+        keepf = inf_ & (zbf > Zf - 0.5 - 0.02 * Zf) & (rng.random(nf) < np.clip(Ef * 0.5 - 0.02, 0.0, 0.3) * np.clip(9.0 / Zf, 0.15, 1.0))
+        # lower snow specular: only ~half the glints survive (painted snow is matte, a few glints read)
+        # round 5: sparse glints, local to the lamp pools only (powder, not wet plastic)
+        keep = keep & (rng.random(n) < 0.4)
+        keepf = keepf & (rng.random(nf) < 0.3)
+        Yk = np.full(int(keep.sum()), Y_PLAT + 0.01)
         self.sp_u = np.concatenate([u[keep], uf[keepf]]).astype(np.float32)
         self.sp_v = np.concatenate([v[keep], vf[keepf]]).astype(np.float32)
         Ek = np.concatenate([E[keep], Ef[keepf]])
@@ -2639,16 +2797,18 @@ class Scene:
         u, v = self._proj(self.sp_x[sel], self.sp_y[sel], self.sp_z[sel], *ct)
         n = int(sel.sum())
         R = (max(0.95 * self.s, 0.55) * self.sp_R[sel]).astype(np.float32)
-        col = self.sp_col[sel] * 2.0 * (1 + 0.4 * (self.sp_R[sel] > 1.4))[:, None]
+        col = self.sp_col[sel] * 0.85 * (1 + 0.25 * (self.sp_R[sel] > 1.4))[:, None]
         a = np.clip(tw[sel] * (0.55 + self.sp_I[sel] * 0.8), 0, 1).astype(np.float32)
         z0 = np.zeros(n, np.float32)
         L.splat_flakes(img, u.astype(np.float32), v.astype(np.float32), z0, z0, R, col, a, np.zeros(n, np.int32))
         return img
 
     def _cam_at(self, t):
+        # lateral truck (camera slides right along the platform) with only a slight push: the near pine
+        # races across the frame, the canopy drifts, the village barely moves
         u = C.ease_in_out_sine(t / DURATION)
-        tx = -0.3 + 0.6 * u
-        tz = 0.7 * u
+        tx = -0.36 + 0.72 * u
+        tz = 0.25 * u
         ty = 0.02 * math.sin(t * 0.9)
         return tx, ty, tz
 
@@ -2715,11 +2875,51 @@ class Scene:
         lu = Ml[0, 0] * u + Ml[0, 2]
         lv = Ml[1, 1] * v + Ml[1, 2]
         img = img + self._flare_at(lu, lv)
-        img = self._bloom(img)
+        # round 5: warm glow of the lit snowy air around both lamp heads (painted, wide and soft)
+        u2, v2 = cam.p(*self.lamps[-1][0])
+        lu2, lv2 = Mm[0, 0] * u2 + Mm[0, 2], Mm[1, 1] * v2 + Mm[1, 2]
+        img = img + R5.lamp_air_glow(W, H, [(lu, lv, WARM, 330 * s, 0.04), (lu2, lv2, WARM, 190 * s, 0.033)], s)
+        # (cycle 7) s08 -> s10 light leak, built in-shot so it is an optical event on the lamp head: an
+        # additive warm bloom that starts ~6 frames (0.25 s) before the cut at the end of the edit window
+        # (source frame 96 = t 4.0 s) and peaks on the cut (assemble adds its own 0.30 leak on top)
+        pk_ = C.smoothstep(3.75, 4.0, t) * C.smoothstep(4.3, 4.0, t)
+        if pk_ > 1e-3:
+            img = img + R5.lamp_air_glow(W, H, [(lu, lv + 20 * s, np.array([1.0, 0.8, 0.5], np.float32), 300 * s, 0.13 * pk_ ** 1.5),
+                                                (lu, lv, np.array([1.0, 0.9, 0.72], np.float32), 80 * s, 0.2 * pk_ ** 1.5)], s)
+        img = self._bloom(img, strength=0.45, halation=0.3)
         img = self.bk.frame(np.ascontiguousarray(img, np.float32), t, tx, vsum, cam.f)
+        img = self._lens_flakes(img, t, tx, vsum)
         img = F.shoulder(img, 0.82, 0.3)
         img = img * self._paper()
         return F.finish_fast(img, t, sat=1.08, grain_amt=0.0022, vig=0.35, ca=0.0008)
+
+    def _lens_flakes(self, img, t, tx, light):
+        """Two or three huge defocused flakes a metre or two from the lens: they cross the frame at camera
+        speed (true world positions, projected with the truck), the strongest depth cue in the shot."""
+        W, H, f = self.W, self.H, self.cam.f
+        # (X world rel. to camera start, Y, Z, fall m/s, radius m)
+        LF = ((0.5, 0.35, 1.5, 0.2, 0.07), (-0.1, 0.05, 2.1, 0.12, 0.08), (0.9, 0.3, 1.25, 0.16, 0.06))
+        xs, ys, rs, cs, als = [], [], [], [], []
+        for i, (X, Y, Z, vy, r) in enumerate(LF):
+            Yt = Y - vy * t + 0.03 * math.sin(0.7 * t + i)
+            Xt = X + 0.05 * t + 0.02 * math.sin(0.5 * t + 2 * i)
+            u = W * 0.54 + f * (Xt - tx) / Z
+            v = H * 0.57 - f * Yt / Z
+            R = f * r / Z
+            if u < -R * 2 or u > W + R * 2:
+                continue
+            ui, vi = int(np.clip(u, 0, W - 1)), int(np.clip(v, 0, H - 1))
+            wk = float(np.clip(light[vi, ui].max() * 3.0, 0, 1))
+            c = np.array([0.95, 1.05, 1.35], np.float32) * (1 - wk) + np.array([1.6, 1.1, 0.55], np.float32) * wk
+            xs.append(u); ys.append(v); rs.append(R); cs.append(c); als.append(0.27 + 0.06 * wk)
+        if not xs:
+            return img
+        img = np.ascontiguousarray(img, np.float32)
+        n = len(xs)
+        BK.screen_discs(img, np.array(xs, np.float32), np.array(ys, np.float32), np.array(rs, np.float32),
+                        np.full(n, 0.9, np.float32), np.array(cs, np.float32), np.array(als, np.float32),
+                        np.array([0.3, 0.9, 0.1][:n], np.float32))
+        return img
 
     def _paper(self):
         """Static paint/paper tooth (screen-locked, identical every frame): soft mottling + fine fibres."""

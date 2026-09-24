@@ -1,4 +1,30 @@
-"""s07_comet_night - Night sky over a mountain lake (Your Name homage).
+"""Round 15 (final-panel notes): night clouds repainted as flat moonlit yn_05 shapes (s07_comet_night_cloud15):
+no bright outline and no dark base band / drop shadow; a soft moonlit gradient (lighter cyan-grey top, darker
+blue-violet body, bluer translucent base that lets the stars through), soft per-puff planes, painted dabs,
+crisp lit top edges with lost frayed undersides, wind-torn fragments instead of bead chains, warm afterglow on
+the undersides of the horizon clouds. Motion: clouds drift independently (0.009 W/s) during the tilt; the lake
+reflection trails the land by a few px while the camera moves (_refl_lag) and now mirrors the clouds too.
+Round 14: night clouds rebuilt as yn_05 hard-edged cut-outs (s07_comet_night_cloud14 + layout14): unions of
+circles at 3 scales, 1px AA, flat moonlit top cel, flat blue-grey body, hard darker base band, inner lobe
+separations, detached scraps; no blur/noise erosion/skirt.
+s07_comet_night - Night sky over a mountain lake (Your Name homage).
+
+Round 13: clouds repainted from one continuous density field (s07_comet_night_cloud13 + layout13): clustered
+broken banks + torn diagonal streamers along the comet, crisp moonlit tops, feathered inner gradient, flat
+body, translucent lost undersides, no base band / lip. Range plates flattened into painted planes with aerial
+perspective on the back ranges; forests as near-flat masses with a treeline fringe (s07_comet_night_flat13).
+Milky Way: violet/brown/magenta dust tint variation, more stars along lane + band edges. Lake: broken ripple
+dash strokes, stronger light pillars, darker toward camera + shoreline shadow.
+
+Round 12 (final-panel notes): night clouds repainted as flat yn_05 cut-outs - one moonlit top value with a
+crisp scalloped edge, one flat blue-grey body, a hard darker base band with scalloped top, no per-lobe
+shading and no smoke under the bases (s07_comet_night_cloud12); Milky Way dust lanes are broad, soft,
+feathered violet-brown dust clouds with star density rising along their margins (s07_comet_night_mw12).
+
+Round 8: split comet (broad cyan dust fan + separate magenta / gold outer bands + straight ion tail at
+12 deg, s07_comet_night_v6), structured Milky Way (s07_comet_night_mw6), wide gold->salmon->violet
+twilight, rock strata / couloirs / notched crests + HDR comet rim with halation and lost shadow edges
+(terrain), stacked conifer-top bands with snow-dusted crowns (hills + v6), horizontally sliced lake.
 
 Round 7: Your-Name dust tail with a spectral spread (cyan core -> teal -> gold -> magenta -> violet) plus a
 separate straight blue ion tail (s07_comet_night_v5), warm kataware-doki horizon glow, crisp broken Milky Way
@@ -36,6 +62,33 @@ import s07_comet_night_mtn as MT  # noqa: E402
 import s07_comet_night_terrain as TR  # noqa: E402
 import s07_comet_night_hills as HL  # noqa: E402
 import s07_comet_night_v5 as V5  # noqa: E402
+import s07_comet_night_v6 as V6  # noqa: E402
+import s07_comet_night_mw6 as MW6  # noqa: E402
+import s07_comet_night_v7 as V7  # noqa: E402
+import s07_comet_night_mw7 as MW7  # noqa: E402
+import s07_comet_night_v8 as V8  # noqa: E402
+import s07_comet_night_comet8 as CM  # noqa: E402
+import s07_comet_night_ridge8 as RL  # noqa: E402
+import s07_comet_night_mw8 as MW8  # noqa: E402,F401
+import s07_comet_night_mw9 as MW9  # noqa: E402
+import s07_comet_night_comet9 as CM9  # noqa: E402
+import s07_comet_night_cloud9 as K9  # noqa: E402,F401
+import s07_comet_night_cloud12 as K12  # noqa: E402
+import s07_comet_night_mw12 as MW12  # noqa: E402
+import s07_comet_night_cloud13 as K13  # noqa: E402
+import s07_comet_night_cloud14 as K14  # noqa: E402,F401
+import s07_comet_night_cloud15 as K15  # noqa: E402
+import s07_comet_night_flat13 as FT  # noqa: E402
+import s07_comet_night_cloud16 as K16  # noqa: E402,F401
+import s07_comet_night_layout16 as LY16  # noqa: E402,F401
+import s07_comet_night_cloud17 as K17  # noqa: E402
+import s07_comet_night_layout17 as LY17  # noqa: E402
+import s07_comet_night_ridge16 as RL16  # noqa: E402
+import s07_comet_night_layout13 as LY13  # noqa: E402,F401
+import s07_comet_night_layout14 as LY14  # noqa: E402
+import s07_comet_night_flank11 as FL  # noqa: E402
+import s07_comet_night_forest11 as F11  # noqa: E402
+V7.conifer_bands7 = F11.conifer_bands7     # individual clumped conifers instead of stacked bands
 
 DURATION = 5.5
 
@@ -61,7 +114,7 @@ class Scene:
         self.Wp, self.Hp, self.my = Wp, Hp, my
         y_h = my + 1.06 * H                        # waterline (far shore) in plate px
         self.y_h = y_h
-        self.truck = 0.07 * W                       # lateral truck amplitude (town plane)
+        self.truck = 0.1 * W                        # lateral truck amplitude (town plane)
         xs, ys = C.grid(Wp, Hp)
 
         # comet geometry (needed early for lighting)
@@ -76,8 +129,9 @@ class Scene:
         veil = np.exp(-((yy - 0.6) / 0.2) ** 2) * np.array([0.05, 0.0, 0.08], np.float32)
         sky = sky + veil * (0.6 + 0.4 * P.fbm_lowres(Wp, Hp, 2, 3, 5, q=8)[..., None])
         # warm kataware-doki glow hugging the horizon (strongest left of centre, away from the comet)
-        tw_add, tw_mix = V5.twilight(Wp, Hp, y_h, H, xs, ys, 0.3 * Wp, seed=8)
-        sky = sky * (1 - tw_mix[..., None] * np.array([0.3, 0.55, 0.8], np.float32)) + tw_add
+        tw_T, tw_M = RL.twilight8(Wp, Hp, y_h, H, xs, ys, 0.36 * Wp, seed=8)
+        sky = sky * (1 - tw_M[..., None]) + tw_T * tw_M[..., None]
+        del tw_T, tw_M
         tg = np.exp(-((xs - 0.27 * Wp) / (0.17 * Wp)) ** 2) * np.exp(-np.clip(y_h - ys, 0, None) / (0.05 * H)) *             (ys < y_h + 2)
         sky += tg[..., None] * np.array([0.22, 0.11, 0.04], np.float32)
         # cool cyan skyglow around / below the comet
@@ -85,16 +139,20 @@ class Scene:
         sky += cg[..., None] * np.array([0.0, 0.05, 0.09], np.float32)
 
         # Milky Way rising from the right-hand horizon, clear of the comet
-        mw, dust, dens = V4.milky_way4(Wp, Hp, (Wp / 2 + 0.43 * W, y_h + 0.03 * H), (Wp / 2 + 0.02 * W, my - 0.15 * H),
-                                       width=0.12 * H, seed=11, strength=1.0, bend=0.03, s=s)
-        ext = 1 - 0.8 * C.smoothstep(y_h - 0.5 * H, y_h, np.arange(Hp, dtype=np.float32))   # extinction
+        mw, dust, dens = MW12.milky_way12(Wp, Hp, (Wp / 2 + 0.46 * W, y_h + 0.03 * H), (Wp / 2 + 0.07 * W, my - 0.15 * H),
+                                        width=0.085 * H, seed=11, strength=0.72, bend=0.03, s=s, core_u=0.3)
+        ext = 1 - 0.6 * C.smoothstep(y_h - 0.35 * H, y_h, np.arange(Hp, dtype=np.float32))   # extinction
         mw *= ext[:, None, None]
         dens *= ext[:, None] ** 2
-        sky = sky * (1 - 0.12 * dust[..., None]) + mw
+        # the Milky Way lives on its own celestial plate (it parallaxes against the land + twilight glow)
+        self.mw = (mw - 0.07 * dust[..., None] * sky).astype(np.float32)
 
-        st, phase = P.stars(Wp, Hp, 21, dens, n_base=1300)
-        st += V.fine_stars(Wp, Hp, 23, dens, int(170000 * Wp * Hp / (1920 * 1080)))
-        st += R.big_glints(Wp, Hp, 29, 12)
+        # star hierarchy: fine dust concentrated in the band, many small coloured point stars (yn_05),
+        # sparkle spikes reserved for a few bright ones
+        st, phase = P.stars(Wp, Hp, 21, dens, n_base=1300, scale=0.45)
+        st += V.fine_stars(Wp, Hp, 23, dens ** 1.3, int(115000 * Wp * Hp / (1920 * 1080)))
+        st += R.big_glints(Wp, Hp, 29, 6)
+        st += V8.coloured_stars(Wp, Hp, int(420 * Wp * Hp / (1920 * 1080)), s, seed=33)
         fade = 1 - C.smoothstep(y_h - 0.25 * H, y_h, np.arange(Hp, dtype=np.float32)) * 0.75
         st *= fade[:, None, None]
         self.stars = st.astype(np.float32)
@@ -106,22 +164,23 @@ class Scene:
         d1 = (-0.78, -0.63)
         n1 = math.hypot(*d1)
         d1 = (d1[0] / n1, d1[1] / n1)
-        tb, tw0, tw1 = 0.16, 0.0035, 0.11
-        t1, u1, vn1, b1 = V5.comet_tail5(Wp, Hp, self.head, d1, L, W, s, bend=tb, w0=tw0, w1=tw1, seed=3)
-        t1 += V5.tail_particles(Wp, Hp, self.head, d1, L, W, s, tb, tw0, tw1, int(1800 * s + 300), 31)
-        # Your-Name split: a fragment just behind the nucleus; the thin straight blue ion tail diverges
-        # from the nucleus on the leading side
+        tb, tw0, tw1, twx = 0.3, 0.003, 0.17, 1.25
+        # yn_05 split comet: hard white core line, striated cyan dust fan with brushed feathering, thin
+        # broken magenta fringe + separated magenta/gold secondary band (s07_comet_night_comet8)
+        t1, u1, vn1, b1 = CM9.comet_tail9(Wp, Hp, self.head, d1, L, W, s, bend=tb, w0=tw0, w1=tw1, wexp=twx,
+                                          seed=3, n_dust=int(3300 * s + 300))
         self.frag = (hx + d1[0] * 0.035 * L, hy + d1[1] * 0.035 * L)
-        d2 = _rot(d1, -14.0)
-        t2 = V5.ion_tail(Wp, Hp, self.head, d2, 0.75 * L, W, s)
+        # thin straight blue ion tail diverging from the nucleus at a clear angle (convex side)
+        d2 = _rot(d1, -9.0)
+        t2 = CM9.ion_tail9(Wp, Hp, self.head, d2, 0.8 * L, W, s, curve=-0.035)
         tail = t1 + t2
         # faint cool halo enveloping the tail (wide, low, never clipping)
         tl_l = tail.max(-1)
-        halo = F.fast_blur(tl_l, 0.02 * W) * 0.3 + F.fast_blur(tl_l, 0.06 * W) * 0.25
+        halo = F.fast_blur(tl_l, 0.02 * W) * 0.25 + F.fast_blur(tl_l, 0.06 * W) * 0.2
         tail = tail + halo[..., None] * np.array([0.12, 0.3, 0.55], np.float32)
         del tl_l, halo, t2
-        head_img = V.comet_head(Wp, Hp, self.head, s, 1.0)
-        head_img += V.comet_head(Wp, Hp, self.frag, s, 0.28, col=(0.6, 1.0, 0.95))
+        head_img = CM.comet_head8(Wp, Hp, self.head, s, W)
+        head_img += CM.comet_head8(Wp, Hp, self.frag, s, W, amt=0.12)
         rng = np.random.default_rng(404)
         sp = []
         for k in range(4):
@@ -139,9 +198,9 @@ class Scene:
         self.n_front = 3
         self.sparks = sp
         dcen = np.sqrt((xs - hx) ** 2 + (ys - hy) ** 2) / W
-        cglow = np.exp(-dcen / 0.12)[..., None] * np.array([0.03, 0.06, 0.11], np.float32)
-        fl_ = F.anime_flare(Wp, Hp, hx, hy, intensity=0.35, tint=(0.6, 0.8, 1.0), rays=4,
-                            ray_len=0.03, ghosts=0.0, halo=0.4, streak=0.2, glow=0.5, rot=0.4)
+        cglow = np.exp(-dcen / 0.1)[..., None] * np.array([0.02, 0.045, 0.09], np.float32)
+        fl_ = F.anime_flare(Wp, Hp, hx, hy, intensity=0.22, tint=(0.6, 0.8, 1.0), rays=4,
+                            ray_len=0.025, ghosts=0.0, halo=0.15, streak=0.15, glow=0.25, rot=0.4)
         self.comet_static = (head_img + cglow + fl_).astype(np.float32)
         del head_img, cglow, fl_, dcen
         # tail crop (per-frame lengthening + flowing streamers)
@@ -155,6 +214,25 @@ class Scene:
         full_tail = tail
         del u1, vn1, b1
         self.sky = sky.astype(np.float32)
+        self.sky_par = 0.2          # celestial plates lag the land by 20% of the tilt
+        self.cloud_par = 0.12
+
+        # ------------------------------------------------------------------ night clouds (yn_05)
+        # painted cauliflower clusters, torn streamers and scraps; one big bank low on the right, low
+        # stratus scraps sitting in the warm twilight (warm undersides). Frame fractions at t=0.
+        def fp(fx_, fy_):
+            return Wp / 2 + (fx_ - 0.5) * W, my + fy_ * H
+        # yn_05 painted night clouds: clustered broken banks, torn diagonal streamers along the comet's
+        # direction, crisp moonlit tops, flat body, lost translucent undersides (s07_comet_night_cloud13)
+        # round 16: geometric moonlit cloudlets (lit top plane, darker body, lobe-on-lobe, translucent
+        # lost undersides, tail / Milky Way local tints) - s07_comet_night_cloud16
+        # round 17: FLAT painted shapes (s07_comet_night_cloud17 + layout17): noise-torn silhouettes built from
+        # a few big lobes, hard-edged flat value planes (pale moonlit top, flat blue-grey body, translucent
+        # blue-violet base), cauliflower bumps on the sky side only, torn thick streaks (no bead chains),
+        # crisp violet tops + flat orange undersides on the afterglow clouds
+        self.clouds = K17.night_clouds17(Wp, Hp, LY17.clusters(Wp, W, H, my), H, (hx, hy), full_tail, self.mw, seed=17)
+        rr_ = np.nonzero(self.clouds[..., 3].max(1) > 0.002)[0]
+        self.cl_rows = (int(rr_.min()), int(rr_.max()) + 1)
 
         # ------------------------------------------------------------------ land layers
         ss = 2
@@ -186,7 +264,15 @@ class Scene:
         # snow ranges: an eroded terrain ray-cast from the lake and painted (see s07_comet_night_terrain):
         # faint back range, far centre peaks, near massif + right ridge -> three parallax plates
         cache = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'out', 'cache')
-        for (pl, fpar) in TR.range_plates(Wp, H, W, y_h, b0, Hl, cometL, cache_dir=cache):
+        for ip_, (pl, fpar) in enumerate(TR.range_plates(Wp, H, W, y_h, b0, Hl, cometL, cache_dir=cache,
+                                                         light_dir=-0.85)):
+            if ip_ == 2:
+                # painted couloirs / rock masses / strata on the near flanks (not the valley centre)
+                reg_ = lambda x: np.clip((0.5 * Wp - x) / (0.06 * Wp), 0, 1) +                     np.clip((x - 0.72 * Wp) / (0.06 * Wp), 0, 1)  # noqa: E731
+                pl = FL.paint_flanks(pl, hx, Wp, H, s, seed=3, region=reg_)
+            # crisp comet-light rim + snow glints on the comet-facing ridges, violet shadow sides
+            pl = RL16.ridge_light16(pl, (hx, hy - b0), Wp, H, s, seed=10 + ip_, rim_amt=(0.6, 0.85, 1.0)[ip_],
+                                 shadow_amt=(0.3, 0.45, 0.6)[ip_], glints=int((20, 35, 45)[ip_]))
             full_ = np.zeros((Hl, Wp, 4), np.float32)
             full_[b0:Hl] = pl
             layers.append((full_, fpar))
@@ -210,7 +296,8 @@ class Scene:
         mid = HL.forest_hills2(Wp, Hl, rows_, ss, s, H, cometL, 205, y_h, 0.0105 * H,
                                dict(snow_lit=_hex('#48679f'), snow_sh=_hex('#1c306a'), snow_gully=_hex('#1a2d66'),
                                     forest_lit=_hex('#172d63'), forest_sh=_hex('#0c1a45'), forest_base=_hex('#081236')),
-                               _hex('#35599a'), mist_amt=0.32, back_haze=0.42, rim_col=(0.42, 0.66, 0.95))
+                               _hex('#35599a'), mist_amt=0.28, back_haze=0.18, rim_col=(0.42, 0.66, 0.95),
+                               forest_bias=0.3)
         # pylon on the right ridge (blinking red light) + wires sagging across the valley
         tx = 0.86 * Wp
         ti = int(tx)
@@ -233,7 +320,7 @@ class Scene:
         tmask = P.lines_mask(Wp, Hl, tw, 0.9 * s + 0.3)
         mid[..., :3] = C.over(mid[..., :3], _hex('#0c1844'), tmask)
         mid[..., 3] = np.maximum(mid[..., 3], tmask)
-        layers.append((mid, 0.55))
+        layers.append((mid, 0.6))
         # luminous mist lying over the shoreline: behind the town, in front of the far forest
         layers.append((HL.shore_mist(Wp, Hl, y_h, H, s, hx, 0.27 * Wp, seed=71), 0.8))
 
@@ -491,13 +578,38 @@ class Scene:
         del wimg, halo_w, limg, xl, yl_, th_, glow
 
         self.layers = [(np.ascontiguousarray(l[b0:Hl]).astype(np.float32), f) for (l, f) in layers]
+        # round 13: repaint the plates - flat painted rock/snow planes (no faceted bevels), aerial perspective
+        # on the back ranges, forests as near-flat value masses with only a treeline edge of tree tips
+        hz_ = sky[int(y_h - 0.25 * H), int(0.2 * Wp):int(0.8 * Wp)].mean(0)
+        xf_ = np.arange(Wp, dtype=np.float32) / Wp
+        xm_ = 1 - ((xf_ > 0.09) & (xf_ < 0.47)).astype(np.float32)
+        xm_ = cv2.GaussianBlur(xm_[None, :], (0, 0), 10 * s + 1)[0]
+        new_ = []
+        for k_, (l_, f_) in enumerate(self.layers):
+            if k_ == 0:
+                l_ = FT.flatten_range(l_, s, haze=hz_, haze_amt=0.35, contrast=0.6)
+            elif k_ == 1:
+                l_ = FT.flatten_range(l_, s, haze=hz_, haze_amt=0.18, contrast=0.8)
+            elif k_ == 2:
+                l_ = FT.flatten_range(l_, s)
+            elif k_ == 4:
+                l_ = FT.flatten_forest(l_, H, s)
+            elif k_ == len(self.layers) - 1:
+                l_ = FT.flatten_forest(l_, H, s, xmask=xm_)
+            new_.append((np.ascontiguousarray(l_).astype(np.float32), f_))
+        self.layers = new_
         # half-res copies for the per-frame reflection band
         self.layers_h = [(cv2.resize(l, (Wp // 2, (Hl - b0) // 2), interpolation=cv2.INTER_AREA), f)
                          for (l, f) in self.layers]
         self.glow_h = cv2.resize(self.town_glow, (Wp // 2, (Hl - b0) // 2), interpolation=cv2.INTER_AREA)
 
         # ------------------------------------------------------------------ reflection plate
-        full = self.sky + self.comet_static + full_tail
+        full = self.sky + self.mw + self.comet_static + full_tail
+        # moonlit clouds (and their warm undersides) mirrored too, placed where they sit late in the tilt
+        Mr_ = np.array([[1, 0, 0], [0, 1, self.cloud_par * self.tilt * 0.85]], np.float32)
+        clr = cv2.warpAffine(self.clouds, Mr_, (Wp, Hp), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        full = full * (1 - clr[..., 3:4]) + clr[..., :3] * clr[..., 3:4]
+        del clr
         refl = cv2.GaussianBlur(full, (0, 0), sigmaX=0.8 * s + 0.2, sigmaY=1.8 * s + 0.3)
         soft = C.blur(self.comet_static + full_tail, 7 * s + 0.5) * 0.45
         refl += soft
@@ -546,12 +658,31 @@ class Scene:
         self.lkc += streaks([(hx, hy, np.array([0.6, 0.85, 1.0]), 1.6, 8 * s)])
         self.lkc += V4.tail_glitter(Hlk, Wp, self.head, d1, L, y_h, self.lk0, H, s, (0.35, 0.62, 1.0), amt=0.5,
                                     bend=0.2)
+        # the tail's glitter columns are separate narrow strips: merge them into one soft wash
+        self.lkc = cv2.GaussianBlur(self.lkc, (0, 0), sigmaX=5.0 * s + 0.5, sigmaY=0.5)
         del xk, yk, spill
 
         # ------------------------------------------------------------------ water textures
         self.T1 = P.tile_noise(256, 41, 4.0, 20.0)
         self.T2 = P.tile_noise(256, 43, 7.0, 30.0)
         self.T3 = P.tile_noise(256, 45, 10.0, 10.0)
+        self.T4 = P.tile_noise(256, 47, 20.0, 60.0)
+        # round 13: hand-placed ripple strokes (broken horizontal dashes, dark wave backs + pale sky-lit crests)
+        rs_ = np.random.default_rng(1313)
+        NS = 1024
+        ts = np.zeros((NS, NS), np.float32)
+        for i_ in range(1500):
+            y_ = rs_.uniform(0, NS)
+            x_ = rs_.uniform(0, NS)
+            ln_ = rs_.uniform(10, 80) * (1 + 1.5 * rs_.random() ** 4)
+            v_ = -1.0 if rs_.random() < 0.65 else 1.0
+            hh_ = rs_.uniform(0.6, 1.4)
+            for dx_ in (-NS, 0, NS):
+                # long, thin, pointed dash (a brush flick), tapered at both ends
+                cv2.ellipse(ts, (int((x_ + dx_) * 4), int(y_ * 4)), (int(ln_ * 2), int(hh_ * 4)), 0, 0, 360,
+                            v_ * rs_.uniform(0.6, 1.0), -1, cv2.LINE_AA, shift=2)
+        # tapered ends: soften horizontally only
+        self.TS = cv2.GaussianBlur(ts, (0, 0), sigmaX=2.0, sigmaY=0.6)
         wy = np.arange(Hlk, dtype=np.float32) / (0.5 * H)
         wc0, wc1 = _hex('#1c2c66'), _hex('#070f34')
         self.water_grad = (wc0 + (wc1 - wc0) * np.clip(wy, 0, 1)[:, None] ** 0.6).astype(np.float32)
@@ -603,6 +734,17 @@ class Scene:
         tr = self.truck * (0.2 * u + 0.8 * C.ease_in_out_sine(u) - 0.5)
         return cy, z, e, tr
 
+    def _refl_lag(self, t):
+        """Reflection trails the tilt by a few px while the camera moves (0 at rest)."""
+        dt_ = 0.35
+        e1 = self.cam(t)[2]
+        e0 = self.cam(max(t - dt_, 0.0))[2]
+        return 0.9 * (e1 - e0) / dt_ * DURATION / 1.4 * 0.007 * self.H
+
+    def _vlag(self, f, e):
+        """Crane component: far land planes sink slightly behind the nearer ones as the camera lowers."""
+        return 0.1 * max(0.0, 0.6 - f) * self.tilt * e
+
     def _M(self, cy, z):
         W, H = self.W, self.H
         return np.array([[1 / z, 0, self.Wp / 2 - W / 2 / z], [0, 1 / z, cy - H / 2 / z]], np.float32)
@@ -626,6 +768,9 @@ class Scene:
         W, H, s = self.W, self.H, self.s
         cy, z, e, tr = self.cam(t)
         M = self._M(cy, z)
+        # celestial plates (stars, Milky Way, comet) move less than the land during the tilt/crane
+        Mc = M.copy()
+        Mc[1, 2] -= self.sky_par * self.tilt * e
         yh_f = (self.y_h - M[1, 2]) * z
         r0 = int(min(max(math.floor(yh_f), 0), H))       # first lake row
         rs = min(r0 + 2, H)                                # sky/land rows to render
@@ -633,10 +778,11 @@ class Scene:
 
         img = np.zeros((H, W, 3), np.float32)
         met = np.zeros((H, W, 3), np.float32)
+        clA = None
         if rs > 0:
             sk = self._warp_rows(self.sky, M, rs, cv2.BORDER_REPLICATE)
-            stv = self._warp_rows(self.stars, M, rs)
-            M2 = M.copy()
+            stv = self._warp_rows(self.stars, Mc, rs)
+            M2 = Mc.copy()
             M2[:, :2] *= 2
             hr = (rs + 1) // 2
             ph = cv2.warpAffine(self.phase, M2, (W // 2, hr), flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP,
@@ -644,14 +790,15 @@ class Scene:
             tw = 0.8 + 0.2 * np.sin(t * (1.6 + 2.4 * ph) + ph * 40.0)
             tw = cv2.resize(tw, (W, hr * 2), interpolation=cv2.INTER_NEAREST)[:rs]
             sk += stv * tw[..., None]
-            sk += self._warp_rows(self.comet_static, M, rs)
+            sk += self._warp_rows(self.mw, Mc, rs)
+            sk += self._warp_rows(self.comet_static, Mc, rs)
             # tail: slowly lengthening, with gently flowing streamers
             tx0, ty0 = self.tbox
             th_, tw_ = self.tail.shape[:2]
-            fx0 = int(max((tx0 - M[0, 2]) * z - 2, 0)); fx1 = int(min((tx0 + tw_ - M[0, 2]) * z + 2, W))
-            fy0 = int(max((ty0 - M[1, 2]) * z - 2, 0)); fy1 = int(min((ty0 + th_ - M[1, 2]) * z + 2, rs))
+            fx0 = int(max((tx0 - Mc[0, 2]) * z - 2, 0)); fx1 = int(min((tx0 + tw_ - Mc[0, 2]) * z + 2, W))
+            fy0 = int(max((ty0 - Mc[1, 2]) * z - 2, 0)); fy1 = int(min((ty0 + th_ - Mc[1, 2]) * z + 2, rs))
             if fx1 > fx0 and fy1 > fy0:
-                Mt = np.array([[1 / z, 0, M[0, 2] - tx0 + fx0 / z], [0, 1 / z, M[1, 2] - ty0 + fy0 / z]], np.float32)
+                Mt = np.array([[1 / z, 0, Mc[0, 2] - tx0 + fx0 / z], [0, 1 / z, Mc[1, 2] - ty0 + fy0 / z]], np.float32)
                 tl = cv2.warpAffine(self.tail, Mt, (fx1 - fx0, fy1 - fy0), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
                                     borderMode=cv2.BORDER_CONSTANT)
                 aux = cv2.warpAffine(self.tail_aux, Mt, (fx1 - fx0, fy1 - fy0),
@@ -666,7 +813,7 @@ class Scene:
             # fragment sparkle (slow, smooth glint)
             nsp = len(self.sparks)
             for i, (x, y, it, col) in enumerate(self.sparks):
-                fxs, fys = (x - M[0, 2]) * z, (y - M[1, 2]) * z
+                fxs, fys = (x - Mc[0, 2]) * z, (y - Mc[1, 2]) * z
                 if 0 <= fys < rs:
                     k = 0.72 + 0.28 * math.sin(t * (1.3 + 0.37 * i) + i * 2.1)
                     C.splat(sk, fxs, fys, 0.9 * s + 0.35, np.asarray(col, np.float32), 2.0 * it * k)
@@ -675,10 +822,10 @@ class Scene:
                         C.splat(sk, fxs, fys, 1.3 * s + 0.4, np.asarray(col, np.float32), 2.2 * it * k)
                         V4.cross_flare(sk, fxs, fys, (12 + 7 * it) * s, 0.5 * s + 0.3, col, 0.8 * it * k, rot=0.3)
             # hot nucleus: short cross-flare
-            hfx0, hfy0 = (self.head[0] - M[0, 2]) * z, (self.head[1] - M[1, 2]) * z
+            hfx0, hfy0 = (self.head[0] - Mc[0, 2]) * z, (self.head[1] - Mc[1, 2]) * z
             if -40 < hfy0 < rs + 40:
-                V4.cross_flare(sk, hfx0, hfy0, 34 * s, 0.7 * s + 0.3, (0.8, 0.93, 1.0), 0.9, rot=0.3)
-                V4.cross_flare(sk, hfx0, hfy0, 16 * s, 0.6 * s + 0.3, (0.9, 0.97, 1.0), 0.5, rot=0.3 + math.pi / 4)
+                tw_k = 0.92 + 0.08 * math.sin(t * 2.1)
+                CM9.star_flare(sk, hfx0, hfy0, s, amt=tw_k, rot=0.3)
             for (t0, dur, x0f, y0, angd, lenf, br) in self.meteors:
                 qq = (t - t0) / dur
                 if qq < 0 or qq > 1.25:
@@ -691,9 +838,24 @@ class Scene:
                 tail = lenf * W * min(qq * 1.6, 1.0)
                 env = math.sin(min(qq, 1.0) * math.pi) ** 0.7 if qq <= 1 else 0.0
                 fade_after = max(0.0, 1 - (qq - 1) / 0.25) if qq > 1 else 0.0
-                self._streak(met, (hx - M[0, 2]) * z, (hy - M[1, 2]) * z, -dx, -dy, tail * z, 1.1 * s + 0.4,
+                self._streak(met, (hx - Mc[0, 2]) * z, (hy - Mc[1, 2]) * z, -dx, -dy, tail * z, 1.1 * s + 0.4,
                              br * max(env, fade_after * 0.25))
             sk += met[:rs]
+            # flat night clouds (atmosphere: in front of the comet), own parallax + slow drift
+            Mcl = M.copy()
+            Mcl[1, 2] -= self.cloud_par * self.tilt * e
+            Mcl[0, 2] -= 0.06 * tr + 0.009 * W * t
+            c0_ = int(max((self.cl_rows[0] - Mcl[1, 2]) * z - 2, 0))
+            c1_ = int(min((self.cl_rows[1] - Mcl[1, 2]) * z + 2, rs))
+            if c1_ > c0_:
+                Mcl[1, 2] += c0_ / z
+                cl = cv2.warpAffine(self.clouds, Mcl, (W, c1_ - c0_), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
+                                    borderMode=cv2.BORDER_CONSTANT)
+                a_ = cl[..., 3:4]
+                sk[c0_:c1_] = sk[c0_:c1_] * (1 - a_) + cl[..., :3] * a_
+                # moonlit clouds are flat painted shapes: keep them out of the bloom source (no halo rim)
+                clA = np.zeros((H, W), np.float32)
+                clA[c0_:c1_] = a_[..., 0]
             img[:rs] = sk
             # land planes with parallax
             fr0 = int(max(math.floor((self.b0 - M[1, 2]) * z), 0))
@@ -701,13 +863,13 @@ class Scene:
                 band = img[fr0:rs]
                 for k_, (lay, f) in enumerate(self.layers):
                     dft = self.cloud_drift * t if k_ == self.cloud_layer else 0.0
-                    lw = self._warp_band(lay, M, f * tr + dft, self.b0, fr0, rs)
+                    lw = self._warp_band(lay, M, f * tr + dft, self.b0 + self._vlag(f, e), fr0, rs)
                     band = F.over_rgba(band, lw)
                 band += self._warp_band(self.town_glow, M, tr, self.b0, fr0, rs)
                 img[fr0:rs] = band
 
         blink = max(0.0, math.sin(t * 2 * math.pi * 0.6)) ** 3
-        fm = 0.55 * tr
+        fm = 0.6 * tr
         tx = (self.tower_light[0] + fm - M[0, 2]) * z
         ty = (self.tower_light[1] - M[1, 2]) * z
         C.splat(img, tx, ty, 1.4 * s + 0.3, np.array([1.0, 0.15, 0.1], np.float32), 2.5 * blink + 0.15)
@@ -722,6 +884,7 @@ class Scene:
         # ---- lake
         if r0 < H:
             self._t = t
+            self._e = e
             self._update_refl_band(tr)
             px = self.xs_f[r0:] / z + M[0, 2]
             py = self.ys_f[r0:] / z + M[1, 2]
@@ -743,17 +906,17 @@ class Scene:
             img[my0:my1] = img[my0:my1] * (1 - ma) + mc * ma
 
         # ---- lens-flare ghosts from the comet head
-        hfx = (self.head[0] - M[0, 2]) * z
-        hfy = (self.head[1] - M[1, 2]) * z
+        hfx = (self.head[0] - Mc[0, 2]) * z
+        hfy = (self.head[1] - Mc[1, 2]) * z
         if -0.2 * H < hfy < 1.1 * H:
             vx, vy = W / 2 - hfx, H / 2 - hfy
             for kk, rad, col, it in ((0.55, 0.012, (0.4, 0.7, 1.0), 0.04), (1.25, 0.03, (0.5, 0.9, 0.8), 0.025),
                                      (1.7, 0.018, (0.8, 0.6, 1.0), 0.03)):
                 C.splat(img, hfx + vx * kk, hfy + vy * kk, rad * W, np.array(col, np.float32), it)
 
-        img = self._reeds(img, t, e, z, 2.0 * tr)
+        img = self._reeds(img, t, e, z, 2.8 * tr - 0.08 * W)
 
-        img = self._bloom(img)
+        img = self._bloom(img, mask=clA)
         img = F.shoulder(img, 0.85, desat=0.2)
         return F.finish_fast(img, t, sat=1.08, grain_amt=0.003, vig=0.3, ca=0.0006)
 
@@ -766,25 +929,30 @@ class Scene:
         alpha = np.zeros((hh, ww), np.float32)
         for k_, (lay, f) in enumerate(self.layers_h):
             dft = self.cloud_drift * self._t if k_ == self.cloud_layer else 0.0
-            Mh = np.array([[1, 0, -(f * tr + dft) / 2], [0, 1, 0]], np.float32)
+            Mh = np.array([[1, 0, (f * tr + dft) / 2], [0, 1, self._vlag(f, self._e) / 2]], np.float32)
             lw = cv2.warpAffine(lay, Mh, (ww, hh), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
             comp = F.over_rgba(comp, lw)
             alpha = np.maximum(alpha, lw[..., 3])
-        Mh = np.array([[1, 0, -tr / 2], [0, 1, 0]], np.float32)
+        Mh = np.array([[1, 0, tr / 2], [0, 1, 0]], np.float32)
         comp += cv2.warpAffine(self.glow_h, Mh, (ww, hh), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
-        comp = cv2.GaussianBlur(comp, (0, 0), sigmaX=0.4 * s + 0.1, sigmaY=0.9 * s + 0.15)
+        comp = cv2.GaussianBlur(comp, (0, 0), sigmaX=0.6 * s + 0.1, sigmaY=1.4 * s + 0.15)
+        # mirrored land a touch darker and softer than the originals
+        comp = comp * (1 - 0.18 * alpha[..., None])
         Hb = self.Hl - self.b0
         big = cv2.resize(comp, (self.Wp, Hb), interpolation=cv2.INTER_LINEAR)
         ab = cv2.resize(alpha, (self.Wp, Hb), interpolation=cv2.INTER_LINEAR)
         big += self.rb_soft + self.rb_glint * (1 - ab[..., None])
         self.refl[self.b0:self.Hl] = big * self.refl_tint
 
-    def _bloom(self, img, threshold=0.75, knee=0.3, strength=0.35):
+    def _bloom(self, img, threshold=0.75, knee=0.3, strength=0.35, mask=None):
         H, W = self.H, self.W
         q = 4
         small = cv2.resize(img, (W // q, H // q), interpolation=cv2.INTER_AREA)
         lum = small.max(-1, keepdims=True)
         k = np.clip((lum - threshold + knee) / (2 * knee), 0, 1) ** 2
+        if mask is not None:
+            ms = cv2.resize(mask, (W // q, H // q), interpolation=cv2.INTER_AREA)
+            k = k * (1 - 0.92 * np.clip(ms, 0, 1))[..., None]
         br = small * k
         acc = np.zeros_like(br)
         for r, wt in ((0.004, 1.0), (0.012, 0.8), (0.035, 0.6), (0.09, 0.45)):
@@ -816,61 +984,114 @@ class Scene:
     def _lake(self, t, px, py, met, M, z, car, yh_f, r0, tr):
         H, W, s = self.H, self.W, self.s
         y_h = self.y_h
-        dyw = np.maximum(py - y_h, 0.25)
-        D = (0.05 * H) / dyw
-        X = (px - tr - self.Wp / 2) / dyw
         N = 256.0
-        tu1 = X * 60.0 + t * 1.5
+        Hr_, Wr_ = px.shape
+        # smooth ripple fields are evaluated at half resolution and upsampled (they are band-limited by the
+        # anti-alias factors anyway); the reflection / light look-ups stay full resolution
+        hq = 2
+        pxh = cv2.resize(px, ((Wr_ + 1) // hq, (Hr_ + 1) // hq), interpolation=cv2.INTER_LINEAR)
+        pyh = cv2.resize(py, ((Wr_ + 1) // hq, (Hr_ + 1) // hq), interpolation=cv2.INTER_LINEAR)
+
+        def rm(T, u, v):
+            return cv2.remap(T, np.mod(u, N).astype(np.float32), np.mod(v, N).astype(np.float32),
+                             cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+        dyw = np.maximum(pyh - y_h, 0.25)
+        D = (0.05 * H) / dyw
+        X = (pxh - tr - self.Wp / 2) / dyw
+        tu1 = X * 24.0 + t * 1.5
         tv1 = D * 700.0 - t * 5.0
-        tu2 = X * 110.0 - t * 2.0
+        tu2 = X * 45.0 - t * 2.0
         tv2 = D * 1100.0 - t * 7.0
-        n1 = cv2.remap(self.T1, np.mod(tu1, N).astype(np.float32), np.mod(tv1, N).astype(np.float32),
-                       cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
-        n2 = cv2.remap(self.T2, np.mod(tu2, N).astype(np.float32), np.mod(tv2, N).astype(np.float32),
-                       cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
-        n3 = cv2.remap(self.T3, np.mod(tu1 * 0.7 + 50, N).astype(np.float32), np.mod(tv1 * 0.5 + 90, N).astype(np.float32),
-                       cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+        n1 = rm(self.T1, tu1, tv1)
+        n2 = rm(self.T2, tu2, tv2)
         dDdy = (0.05 * H) / (dyw * dyw) / z
         aa = np.clip(1.5 / np.maximum(dDdy * 700.0, 1e-3), 0, 1)
         nn = (n1 * 0.65 + n2 * 0.35) * aa
         A = 0.02 * dyw + 0.4 * s
-        ph1 = D * 600.0 + n1 * 2.2 + X * 1.5 - t * 1.6
-        ph2 = D * 1100.0 - n2 * 1.8 - X * 2.5 - t * 2.3
-        aa1 = np.clip(1.6 - dDdy * 600.0 * 1.2, 0, 1)
-        aa2 = np.clip(1.6 - dDdy * 1100.0 * 1.2, 0, 1)
-        env_ = np.clip(0.55 + 0.45 * n3, 0.1, 1.0)
-        sw = (np.sin(ph1) * aa1 * 0.6 + np.sin(ph2) * aa2 * 0.4) * env_
-        sx = px + n3 * aa * A * 0.3 + sw * A * 0.7
-        sy = 2 * y_h - py + nn * A
-        sy = np.clip(sy, 0, self.Hp - 1)
+        nh1 = rm(self.T1, X * 7.0 + t * 0.25, D * 900.0 - t * 4.0)
+        nh2 = rm(self.T1, X * 22.0 + 40 - t * 0.4, D * 2100.0 - t * 6.0 + 17)
+        nh1 = nh1 * np.clip(1.5 / np.maximum(dDdy * 900.0, 1e-3), 0, 1)
+        nh2 = nh2 * np.clip(1.5 / np.maximum(dDdy * 2100.0, 1e-3), 0, 1)
+        # sparse ripple patches: most of the lake is a calm mirror, wind-ripple breaks come in drifting
+        # irregular patches (no regular scanline banding)
+        gz = rm(self.T3, X * 4.0 + 11 + t * 0.15, D * 160.0 - t * 1.2 + 23)
+        gate = C.smoothstep(0.2, 1.3, gz) * np.clip(1.5 / np.maximum(dDdy * 160.0, 1e-3), 0, 1)
+        gate = 0.15 + 0.85 * gate
+        nh1 = nh1 * gate
+        nh2 = nh2 * gate
+        dsx = nh2 * A * 0.12
+        dsy = (nn * 0.3 * gate + nh1 * 1.0) * A
+        fres = (0.66 + 0.26 * np.exp(-dyw / (0.14 * H))) * (1 + 0.06 * nh1 + 0.05 * nh2)
+        dly = nh1 * A * 0.3
+        dlx = nh2 * A * 0.35
+        nb = rm(self.T2, tu2 * 1.7 + 30, tv2 * 2.3 + 70)
+        # light columns break into tapering dashes (ripple crests), not continuous bars
+        dsh = nb * aa + 0.6 * n2 * aa + 0.5 * nh1
+        band = np.clip(0.12 + 1.1 * C.smoothstep(-0.3, 0.7, dsh), 0.05, 1.4)
+        crest = nh2 + 0.35 * nh1
+        glit = 0.12 + 0.5 * C.smoothstep(0.2, 0.9, crest) + 2.2 * C.smoothstep(0.95, 1.15, crest)
+        sheen = np.exp(-dyw / (0.012 * H))
+        stack = np.dstack([dsx, dsy, fres, dly, dlx, band, glit, sheen, nn * A]).astype(np.float32)
+        up = cv2.resize(stack, (Wr_, Hr_), interpolation=cv2.INTER_LINEAR)
+        dsx, dsy, fres, dly, dlx, band, glit, sheen, nnA = [up[..., k] for k in range(9)]
+
+        sx = px + dsx
+        sy = np.clip(2 * y_h - py + dsy + self._refl_lag(t), 0, self.Hp - 1)
         refl = cv2.remap(self.refl, sx.astype(np.float32), sy.astype(np.float32), cv2.INTER_LINEAR,
                          borderMode=cv2.BORDER_REPLICATE)
-        fres = 0.66 + 0.26 * np.exp(-dyw / (0.14 * H))
         rows = np.clip((py[:, 0] - self.lk0).astype(np.int32), 0, self.water_grad.shape[0] - 1)
         wc = self.water_grad[rows][:, None, :]
-        mod = 1 + 0.12 * nn / 2.5 * aa
-        out = wc * (1 - fres[..., None]) + refl * (fres * mod)[..., None]
+        fr0 = 0.66 + 0.26 * np.exp(-np.maximum(py[:, :1] - y_h, 0.25) / (0.14 * H))
+        out = wc * (1 - fr0[..., None]) + refl * fres[..., None]
         # broken light columns (town lights truck with the town; the comet streak stays with the sky)
-        lky = (py - self.lk0 + nn * A * 0.3).astype(np.float32)
-        lkx = px + n3 * aa * A * 0.8 + sw * A * 0.6
+        lky = (py - self.lk0 + dly).astype(np.float32)
+        lkx = px + dlx
         lk = cv2.remap(self.lk, (lkx - tr).astype(np.float32), lky, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
-        nb = cv2.remap(self.T2, np.mod(tu2 * 1.7 + 30, N).astype(np.float32), np.mod(tv2 * 2.3 + 70, N).astype(np.float32),
-                       cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
-        band = np.clip(0.55 + 0.45 * n2 * aa + 0.4 * nb * aa, 0.05, 1.4)
-        out += lk * band[..., None]
+        out += lk * (band * 1.35)[..., None]
         # comet glitter: ripple crests catch the light -> broken horizontal dashes along the column
-        lc = cv2.remap(self.lkc, (lkx + sw * A * 0.8).astype(np.float32), lky, cv2.INTER_LINEAR,
+        lc = cv2.remap(self.lkc, lkx.astype(np.float32), lky, cv2.INTER_LINEAR,
                        borderMode=cv2.BORDER_CONSTANT)
-        crest = np.clip(0.5 + 0.5 * np.sin(ph1 * 1.0 + n2 * 1.5) * aa1 + 0.35 * nb * aa, 0, 1.2)
-        glit = 0.25 + 1.35 * C.smoothstep(0.45, 0.95, crest)
         out += lc * glit[..., None]
-        sheen = np.exp(-dyw / (0.012 * H))
+        # glints: tiny ripple facets catching the sky / comet light, twinkling and drifting slowly
+        dywf = np.maximum(py - y_h, 0.25)
+        Df = (0.05 * H) / dywf
+        Xf = (px - tr - self.Wp / 2) / dywf
+        gn = rm(self.T4, Xf * 30.0 + t * 0.6, Df * 900.0 - t * 3.5)
+        gi = np.nonzero(gn > 2.3)
+        if len(gi[0]):
+            g_ = gn[gi]
+            dD = (0.05 * H) / (dywf[gi] ** 2) / z
+            aag = np.clip(1.2 / np.maximum(dD * 900.0 * 3, 1e-3), 0, 1)
+            spk = C.smoothstep(2.3, 3.1, g_) * aag
+            twk = 0.3 + 0.7 * (0.5 + 0.5 * np.sin(t * 3.3 + 7.0 * g_ + 0.05 * gi[1]))
+            rv = refl[gi]
+            add = (spk * twk)[:, None] * (rv * 1.6 + rv.max(-1, keepdims=True) * np.array([0.3, 0.45, 0.7], np.float32))
+            out[gi] += add
         out += sheen[..., None] * np.array([0.08, 0.14, 0.22], np.float32)
+        # ---- round 13: broken ripple strokes + near-camera darkening (not a blurred mirror)
+        ns_ = float(self.TS.shape[0])
+        dyf = np.maximum(py - y_h, 0.25)
+        Xs = (px - tr - self.Wp / 2) / dyf
+        Ds = (0.05 * H) / dyf
+        su = np.mod(Xs * 300.0 + t * 1.2, ns_).astype(np.float32)
+        sv = np.mod(Ds * 1500.0 - t * 10.0, ns_).astype(np.float32)
+        stk = cv2.remap(self.TS, su, sv, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+        dDs = (0.05 * H) / (dyf * dyf) / z * 1500.0
+        aas = np.clip(2.0 / np.maximum(dDs, 1e-3), 0, 1) ** 0.7
+        stk = stk * aas
+        dark_ = np.clip(-stk, 0, 1)
+        lite_ = np.clip(stk, 0, 1)
+        out = out * (1 - 0.42 * dark_[..., None]) + lite_[..., None] * (0.25 * out + np.array([0.05, 0.09, 0.16], np.float32))
+        # water darkens toward the camera (less sky reflected at steep view angles)
+        near_ = C.smoothstep(0.06 * H, 0.5 * H, py - y_h)
+        out = out * (1 - 0.38 * near_[..., None])
+        # a thin dark shoreline shadow under the far bank
+        out = out * (1 - 0.35 * np.exp(-np.maximum(py - y_h, 0) / (0.004 * H)))[..., None]
         if met.any():
             rr = np.arange(r0, H, dtype=np.float32)
             src_rows = np.clip(2 * yh_f - rr, 0, H - 1).astype(np.float32)
-            mx = np.repeat(np.arange(W, dtype=np.float32)[None, :], len(rr), 0) + n3 * aa * A * 0.5
-            my_ = np.repeat(src_rows[:, None], W, 1) + nn * A
+            mx = np.repeat(np.arange(W, dtype=np.float32)[None, :], len(rr), 0) + dsx * 2.0
+            my_ = np.repeat(src_rows[:, None], W, 1) + nnA
             mr = cv2.remap(met, mx.astype(np.float32), my_.astype(np.float32), cv2.INTER_LINEAR,
                            borderMode=cv2.BORDER_CONSTANT)
             out += C.blur(mr, 1.5 * s) * 0.5
@@ -896,7 +1117,8 @@ class Scene:
         m = np.zeros((hh * ss, W * ss), np.uint8)
         polys = []
         for (bx, h, lean, wdt, ph, fr, head) in self.blades:
-            sway = 0.035 * math.sin(t * fr + ph) + 0.015 * math.sin(t * fr * 2.3 + ph * 1.7)
+            # gentle sway + a slow gust travelling across the reed bed (right to left)
+            sway = 0.035 * math.sin(t * fr + ph) + 0.015 * math.sin(t * fr * 2.3 + ph * 1.7) +                 0.04 * math.sin(t * 1.1 + bx * 6.0) * (0.6 + 0.4 * math.sin(t * 0.5 + 1.0))
             x0 = bx * W + dxr
             L = h * H
             pts_l, pts_r = [], []

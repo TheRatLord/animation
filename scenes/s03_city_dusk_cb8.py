@@ -114,7 +114,7 @@ def lining(P, sun, strength=1.0, rim_px=2.8, pal=None):
                               borderValue=0))
     soft = A * (1 - K2._blur(toward(A, 2.6 * rim_px * u), rim_px * u))
     rgb = P.prem[..., :3] / np.maximum(A, 1e-5)[..., None]
-    litn = K2._ss(0.55, 0.85, rgb.max(-1))
+    litn = K2._ss(0.42, 0.72, rgb.max(-1))     # round 14: the dusk rework darkened the lit side
     k = np.clip(core * 1.7 + 0.3 * soft * convex, 0, 1) * (0.1 + 0.9 * litn) * K2._ss(0.0, 0.6, convex)
     k = np.clip(k * strength, 0, 1)
     rim = np.asarray(pal['rim'], np.float32)
@@ -125,6 +125,198 @@ def lining(P, sun, strength=1.0, rim_px=2.8, pal=None):
     P.prem[..., :3] = P.prem[..., :3] * (1 - k[..., None]) + rim * (A * k)[..., None]
 
 
+def lobe_shade(tower, seed, u, light=(-0.62, -0.58, 0.52), k=0.55):
+    """Round 13: lobe-on-lobe internal modelling (wwy_01). Packs the cloud with cauliflower lobes at three
+    scales (big heads, mid lobes, small florets; smaller ones sit in front), z-buffers them as domes and lights
+    each dome from the up-left key: every lobe gets its own warm-white lit cap and a soft blue-violet underside,
+    and where a lobe overlaps the one behind it the edge reads (lit lobe over the shade of the next). Painted,
+    not rendered: a firm but soft terminator and flat caps, applied over the existing value masses (the big
+    violet shadow side stays in shadow; there lobes only get a faint reflected-light cap)."""
+    A = tower[..., 3]
+    hh, ww = A.shape
+    rng = np.random.default_rng(seed + 991)
+    m8 = (A > 0.5).astype(np.uint8)
+    if m8.sum() < 100:
+        return tower
+    dist = cv2.distanceTransform(m8, cv2.DIST_L2, 5)
+    # a pillow over the whole silhouette (every cauliflower bump of the outline becomes a lobe that turns into
+    # its own shadow) + domes packed inside at two scales (big heads, mid lobes; the mid ones sit in front)
+    Hf = np.sqrt(dist * (60.0 * u)).astype(np.float32)
+    ys_i, xs_i = np.nonzero(m8)
+    for (rmin, rmax, n, zoff) in ((40 * u, 100 * u, 45, 0.0), (16 * u, 36 * u, 90, 18 * u)):
+        pick = rng.integers(0, len(xs_i), n * 4)
+        cnt = 0
+        for j in pick:
+            if cnt >= n:
+                break
+            cx, cy = float(xs_i[j]), float(ys_i[j])
+            dmax = dist[int(cy), int(cx)]
+            r = float(rng.uniform(rmin, rmax))
+            if dmax < 0.3 * r or dmax > 2.5 * r:
+                continue
+            cnt += 1
+            x0, x1 = int(max(cx - r, 0)), int(min(cx + r + 1, ww))
+            y0, y1 = int(max(cy - r, 0)), int(min(cy + r + 1, hh))
+            if x1 <= x0 or y1 <= y0:
+                continue
+            yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
+            dx, dy = (xx - cx) / r, (yy - cy) / r
+            dy2 = np.where(dy > 0, dy * 1.3, dy)
+            d2 = dx * dx + dy2 * dy2
+            h = np.sqrt(np.clip(1.0 - d2, 0, 1)) * r * 0.8 + Hf[int(cy), int(cx)] * 0.9 + zoff
+            h = np.where(d2 < 1.0, h, -1e9)
+            np.maximum(Hf[y0:y1, x0:x1], h, out=Hf[y0:y1, x0:x1])
+    Hs = cv2.GaussianBlur(Hf, (0, 0), 2.5 * u)
+    gx = cv2.Sobel(Hs, cv2.CV_32F, 1, 0, ksize=3) / 8.0
+    gy = cv2.Sobel(Hs, cv2.CV_32F, 0, 1, ksize=3) / 8.0
+    nx, ny, nz = -gx, -gy, np.ones_like(gx) * 0.9
+    nl = np.sqrt(nx * nx + ny * ny + nz * nz)
+    nx, ny, nz = nx / nl, ny / nl, nz / nl
+    covered = m8 > 0
+    L = np.array(light, np.float32)
+    L = L / np.linalg.norm(L)
+    ndl = nx * L[0] + ny * L[1] + nz * L[2]
+    # soft internal gradient + a firm (not hard) painted terminator
+    s = C.smoothstep(-0.1, 0.7, ndl) * 0.6 + C.smoothstep(0.2, 0.42, ndl) * 0.4
+    s = cv2.GaussianBlur(s.astype(np.float32), (0, 0), 1.5 * u)
+    rgb = tower[..., :3]
+    lum = rgb.max(-1)
+    litm = C.smoothstep(0.62, 0.9, cv2.GaussianBlur(lum, (0, 0), 6 * u))
+    lit_c = np.array([1.02, 0.93, 0.82], np.float32)
+    mid_c = np.array([0.96, 0.66, 0.66], np.float32)
+    shd_c = np.array([0.6, 0.55, 0.8], np.float32)
+    tgt = np.where((s < 0.5)[..., None], shd_c + (mid_c - shd_c) * (s / 0.5)[..., None],
+                   mid_c + (lit_c - mid_c) * ((s - 0.5) / 0.5)[..., None])
+    # keep the painted hue of the region (lit mass: warm cream / peach), lobes model its value
+    tgt_lit = tgt * 0.7 + rgb * 0.3 * (0.75 + 0.5 * s[..., None])
+    tgt_shd = rgb * (0.86 + 0.3 * s[..., None]) + np.array([0.04, 0.02, 0.06], np.float32) * s[..., None]
+    new = tgt_lit * litm[..., None] + tgt_shd * (1 - litm[..., None])
+    # protect the painted silhouette lining (outer few px) and the torn base
+    inner = cv2.GaussianBlur(cv2.erode(m8, np.ones((7, 7), np.uint8)).astype(np.float32), (0, 0), 2.0 * u)
+    kk = (k * inner * covered)[..., None]
+    tower[..., :3] = rgb * (1 - kk) + new * kk
+    return tower
+
+
+def dusk_rework(tower, X, Y, H, u, seed, key=(-0.6, -0.8)):
+    """Round 14 (reviewer: 'clay / plasticky, evenly sized bubbles'): push the painted cloud toward yn_02 /
+    wwy_01 at dusk.
+      * clusters of SMALL cauliflower florets along the lit up-left silhouette (varied sizes, bunched, with
+        smooth stretches between clusters): each floret is a lit cap with a tucked violet underside;
+      * value: the body is less cream (warm peach-rose lit side, deeper blue-violet shade, a darker cool core);
+      * the lower third flattens and darkens into one cool violet mass (flat-ish base, few internal forms).
+    Straight-alpha RGBA in, out."""
+    rng = np.random.default_rng(seed + 1414)
+    A = np.ascontiguousarray(tower[..., 3])
+    rgb = tower[..., :3].copy()
+    hh, ww = A.shape
+    m8 = (A > 0.5).astype(np.uint8)
+    if m8.sum() < 100:
+        return tower
+    # ---- value / hue: warm lit, cool deep shade
+    lum = rgb.max(-1)
+    lit = C.smoothstep(0.6, 0.92, cv2.GaussianBlur(lum, (0, 0), 3 * u))[..., None]
+    shade_t = np.array([0.46, 0.4, 0.7], np.float32)
+    rgb = rgb * (0.78 + 0.14 * lit) + (1 - lit) * (shade_t * 0.9 - rgb * 0.25) * 0.55
+    rgb = rgb + lit * (np.array([0.02, -0.03, -0.06], np.float32))
+    # ---- lower part: one flat, darker cool violet mass
+    ys = np.arange(hh, dtype=np.float32)[:, None, None]
+    bm = C.smoothstep(Y(0.3), Y(0.46), ys)
+    base_c = np.array([0.4, 0.33, 0.6], np.float32)
+    lum2 = rgb.mean(-1, keepdims=True)
+    flat = base_c * (0.75 + 0.5 * lum2)
+    rgb = rgb * (1 - 0.72 * bm) + flat * 0.72 * bm
+    # ---- florets on the lit silhouette
+    Ab = cv2.GaussianBlur(A, (0, 0), 3.0 * u)
+    gx = cv2.Sobel(Ab, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(Ab, cv2.CV_32F, 0, 1, ksize=3)
+    cnts, _ = cv2.findContours(m8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    kx, ky = key
+    add_a = np.zeros_like(A)
+    add_c = np.zeros_like(rgb)
+    ss = 3
+    big_a = np.zeros((hh * 1, ww * 1), np.float32)
+    for cnt in cnts:
+        pts = cnt[:, 0, :]
+        n = len(pts)
+        if n < 60:
+            continue
+        # outward normals, facing the key light?
+        g = np.stack([gx[pts[:, 1], pts[:, 0]], gy[pts[:, 1], pts[:, 0]]], 1)
+        gl = np.linalg.norm(g, axis=1) + 1e-6
+        nx, ny = -g[:, 0] / gl, -g[:, 1] / gl
+        face = nx * kx + ny * ky
+        ok = np.nonzero((face > 0.2) & (pts[:, 1] < Y(0.44)))[0]
+        if len(ok) == 0:
+            continue
+        ncl = int(len(ok) / (26 * u)) + 1
+        centres = rng.choice(ok, size=min(ncl, len(ok)), replace=False)
+        for c0 in centres:
+            if rng.random() < 0.35:
+                continue            # smooth stretches between the clusters
+            nf = int(rng.integers(3, 8))
+            step = 0.0
+            for j in range(nf):
+                r = float(rng.uniform(3.0, 9.0) * u * (1.0 - 0.45 * j / nf))
+                step += r * rng.uniform(1.0, 1.6)
+                idx = int(c0 + (step if j % 2 == 0 else -step) / 1.0) % n
+                px, py = float(pts[idx, 0]), float(pts[idx, 1])
+                fx, fy = nx[idx], ny[idx]
+                cx, cy = px - fx * r * 1.05, py - fy * r * 1.05     # inside the edge: modelling only
+                x0, x1 = int(max(cx - r - 3, 0)), int(min(cx + r + 4, ww))
+                y0, y1 = int(max(cy - r - 3, 0)), int(min(cy + r + 4, hh))
+                if x1 <= x0 or y1 <= y0:
+                    continue
+                yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
+                dx, dy = (xx - cx) / r, (yy - cy) / r
+                d = np.sqrt(dx * dx + dy * dy)
+                # the tuck: a thin crescent of cool shade under / behind each floret (the lobe edge reads
+                # against the lobe behind it); a faint warm cap toward the key
+                sh = np.clip(dx * kx + dy * ky, -1, 1)
+                ring = np.clip((1.0 - d) * r + 0.5, 0, 1) * np.clip((d - 0.72) * r * 0.8, 0, 1)
+                tuck = ring * C.smoothstep(0.0, -0.5, sh)
+                cap = np.clip((1.0 - d) * r + 0.5, 0, 1) * C.smoothstep(0.1, 0.7, sh) * 0.5
+                sub_a = add_a[y0:y1, x0:x1]
+                sub_c = add_c[y0:y1, x0:x1]
+                np.maximum(sub_a, tuck, out=sub_a)
+                np.maximum(sub_c[..., 0], cap, out=sub_c[..., 0])
+    inside = C.smoothstep(0.5, 0.9, A)[..., None]
+    add_a[:] = 0.0          # round 14b: the floret tucks read as bubble rings; value / base rework only
+    add_c[:] = 0.0
+    tk = (add_a[..., None] * inside * 0.55 * (1 - bm))
+    rgb = rgb * (1 - tk) + np.array([0.56, 0.44, 0.7], np.float32) * tk
+    cp = add_c[..., :1] * inside * (1 - bm) * (1 - add_a[..., None])
+    rgb = rgb + cp * np.array([0.12, 0.07, 0.03], np.float32)
+    a_new = A
+    tower[..., :3] = np.clip(rgb, 0, None)
+    tower[..., 3] = a_new
+    return tower
+
+
+def sun_rim(tower, sun, u, width=2.4, col=(1.75, 0.66, 0.46)):
+    """Round 14: crisp hot orange-pink rim on the silhouette edges that face the real (low, left) sun
+    (yn_02 / wwy_01): 1-3 px core measured by shifting the mask toward the sun, strongest on the edges that
+    look straight at it, plus a softer peach-rose band a few px inside."""
+    A = np.ascontiguousarray(tower[..., 3])
+    hh, ww = A.shape
+    ys, xs = np.mgrid[0:hh, 0:ww].astype(np.float32)
+    dx, dy = sun[0] - xs, sun[1] - ys
+    dl = np.sqrt(dx * dx + dy * dy) + 1e-3
+    ux, uy = dx / dl, dy / dl
+    sh = lambda r: cv2.remap(A, xs + ux * r, ys + uy * r, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT,
+                             borderValue=0)
+    core = np.clip(A - sh(width * u), 0, 1)
+    band = np.clip(A - cv2.GaussianBlur(sh(6.0 * u), (0, 0), 2.0 * u), 0, 1) * (1 - core)
+    # lower on the cloud = closer to the horizon glow = hotter
+    hot = C.smoothstep(0.05 * hh, 0.5 * hh, ys)
+    k = np.clip(core * 1.3, 0, 1) * (0.55 + 0.45 * hot)
+    kb = band * 0.45 * (0.5 + 0.5 * hot)
+    rgb = tower[..., :3]
+    rgb[:] = rgb * (1 - kb[..., None]) + np.array([1.2, 0.66, 0.6], np.float32) * kb[..., None]
+    rgb[:] = rgb * (1 - k[..., None]) + np.asarray(col, np.float32) * k[..., None]
+    return tower
+
+
 def _torn_base(tower, X, Y, H, sky, seed):
     """Tear the lowest part of the tower along wind-streaks and dissolve it into the sky colour."""
     ph, pw = tower.shape[:2]
@@ -132,8 +324,8 @@ def _torn_base(tower, X, Y, H, sky, seed):
     rng_n = K2._noise(pw, ph, 18.0, seed + 31, 4, stretch=6.0)
     rng_f = K2._noise(pw, ph, 60.0, seed + 37, 2, stretch=8.0)
     prof = K2._noise(pw, 8, 9.0, seed + 41, 3)[4][None, :]
-    # the cut line wanders along x: lobes of base hang lower in places, deep tears elsewhere
-    y_cut = Y(0.47) + (prof - 0.5) * 0.09 * H
+    # the cut line wanders along x (round 14: flatter base, as a dusk cumulonimbus sits on a level floor)
+    y_cut = Y(0.475) + (prof - 0.5) * 0.035 * H
     d = (ys - y_cut) / (0.07 * H)
     n = 0.65 * rng_n + 0.35 * rng_f
     keep = C.smoothstep(0.55, -0.35, d + 0.9 * (n - 0.5) * 2.0 * C.smoothstep(-1.2, 0.4, d))
@@ -161,8 +353,15 @@ def paint(pw, ph, W, H, ox, sun, seed=5, sky=None, key=(-0.56, -0.83), rim_y=0.3
     P = K2.Painter(pw, ph, sun_l, PAL, u, seed=seed + 1, sun_z=0.42)
     cx, base, Hc = _tower(P, X, Y, H, seed, sun_l)
     top = base - Hc
-    lining(P, (float(sun[0]), Y(rim_y)), 1.0, rim_px=2.6)
     tower = P.rgba()
+    tower = lobe_shade(tower, seed, u)
+    tower = dusk_rework(tower, X, Y, H, u, seed)
+    # the lining goes on after the lobe modelling (round 13: stronger, pinker-orange on the sun-facing lobes)
+    a_ = tower[..., 3:4]
+    P.prem = np.concatenate([tower[..., :3] * a_, a_], -1).astype(np.float32)
+    lining(P, (float(sun[0]), Y(rim_y)), 1.7, rim_px=2.6, pal=dict(PAL, rim=(1.95, 0.7, 0.45)))
+    tower = P.rgba()
+    tower = sun_rim(tower, (float(sun[0]), float(sun[1])), u)
     tower = _torn_base(tower, X, Y, H, sky, seed)
     # ------------------------------------------------------------------ low far bank behind the skyline
     Pb = K2.Painter(pw, ph, (float(sun[0]), float(sun[1])), PAL_FAR, u, seed=seed + 5, sun_z=0.05)

@@ -86,9 +86,13 @@ def streak_density(W, H, specs, seed=0):
     return D, TIER
 
 
-def paint(W, H, sky, specs, sun, seed=0, thresh=0.5, edge=0.035):
-    """Returns RGBA straight-alpha plate (H, W, 4) of lit cloud streaks over `sky` (H, W, 3)."""
+def paint(W, H, sky, specs, sun, seed=0, thresh=0.5, edge=0.035, soft=0.0):
+    """Returns RGBA straight-alpha plate (H, W, 4) of lit cloud streaks over `sky` (H, W, 3).
+    soft (round 13): 0 crisp painted silhouette .. 1 thin feathered cirrus (wide soft edge, fibrous
+    translucency, no outline; only the underside catches the light)."""
     D, TIER = streak_density(W, H, specs, seed)
+    thresh = thresh - 0.12 * soft
+    edge = edge + 0.42 * soft
     # crisp painted silhouette
     A = C.smoothstep(thresh - edge * 0.5, thresh + edge * 0.5, D)
     A = C.blur(A, 0.45)
@@ -119,7 +123,7 @@ def paint(W, H, sky, specs, sun, seed=0, thresh=0.5, edge=0.035):
     near = cv2.remap(Ab, xs.astype(np.float32), (ys + off).astype(np.float32),
                      cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
     rim = np.clip(A - near, 0, 1) * 1.8 * C.smoothstep(0.25, 0.7, wv2) * np.clip(uy * 3.0, 0, 1)
-    rim = np.clip(rim, 0, 1)
+    rim = np.clip(rim, 0, 1) * (1.0 - 0.75 * soft)
     # the upper (shadowed) edges are feathered into the sky instead of outlined
     up = cv2.remap(Ab, xs.astype(np.float32), (ys - 3.0 * sc).astype(np.float32), cv2.INTER_LINEAR,
                    borderMode=cv2.BORDER_CONSTANT, borderValue=0)
@@ -158,6 +162,10 @@ def paint(W, H, sky, specs, sun, seed=0, thresh=0.5, edge=0.035):
     col = col * (0.86 + 0.2 * fib + 0.1 * fib2)[..., None]
     # thin edges are translucent (sky shows through, glow)
     alpha = A * (0.55 + 0.45 * dens) * (1 - 0.45 * top_edge)
+    if soft > 0:
+        # cirrus: fibrous translucency along the streaks, the upper side dissolving into the sky
+        fibm = C.smoothstep(0.25, 0.8, 0.6 * fib + 0.4 * fib2)
+        alpha = alpha * (1 - soft * 0.55 * (1 - fibm)) * (1 - soft * 0.35 * C.blur(top_edge, 3.0 * sc))
     out = np.dstack([col, alpha]).astype(np.float32)
     return out
 
@@ -251,3 +259,77 @@ def shafts(W, H, lx, ly, occluder, strength=0.8, length=0.95, radius=0.12, tint=
     x = x / (1 + 0.9 * x)
     out = cv2.resize(x.astype(np.float32), (W, H), interpolation=cv2.INTER_LINEAR)
     return out[..., None] * np.asarray(tint, np.float32)
+
+
+def cirrus(W, H, sky, specs, sun, seed=0, lit=1.0):
+    """Round 13: thin feathered cirrus built from many hair-fine fibres that drift apart along each streak
+    (no stroked outline). Each fibre's opacity comes and goes along its length and the ends trail off softly;
+    a faint blurred veil joins them into one body. Lit from below: the underside burns gold / peach toward the
+    sun, the upper fibres fade into lilac-rose. lit: 1 high sunlit cirrus .. 0 low cloud in the earth's shadow
+    (violet body, pink underside only). Returns straight-alpha RGBA (H, W, 4)."""
+    rng = np.random.default_rng(seed)
+    D = np.zeros((H, W), np.float32)      # fibre density
+    V = np.zeros((H, W), np.float32)      # vertical position inside the streak (-1 top .. 1 bottom)
+    sc = H / 1080.0
+    for si, s in enumerate(specs):
+        cx, cy, L, T = s['cx'], s['cy'], s['L'], s['T']
+        x0b, x1b = int(max(cx - L * 0.6, 0)), int(min(cx + L * 0.6, W))
+        if x1b <= x0b + 4:
+            continue
+        xs = np.arange(x0b, x1b, dtype=np.float32)
+        u = (xs - cx) / (L / 2)
+        env = np.clip(1 - np.abs(u) ** 2.0, 0, 1)
+        nwv = _noise1d(len(xs), max(L / W * 3, 1.5), seed * 97 + si * 7 + 1)
+        yc = cy + s.get('tilt', 0.0) * (xs - cx) + (nwv - 0.5) * T * s.get('wave', 3.0)
+        nf = int(s.get('fibres', 70))
+        gate = 0.3 + 0.7 * np.clip((_noise1d(len(xs), max(L / W * 5, 2.0), seed * 97 + si * 7 + 9) - 0.1) / 0.4, 0, 1)
+        y0b = int(max(np.min(yc) - 3.5 * T - 4, 0))
+        y1b = int(min(np.max(yc) + 2.5 * T + 4, H))
+        if y1b <= y0b:
+            continue
+        ys = np.arange(y0b, y1b, dtype=np.float32)[:, None]
+        dsub = np.zeros((y1b - y0b, len(xs)), np.float32)
+        vsub = np.zeros_like(dsub)
+        for k in range(nf):
+            sd = seed * 1000 + si * 100 + k
+            # fibres fan upward and apart from a denser lit base line (combed by the wind)
+            base = 1.0 - 1.9 * rng.random() ** 1.6        # dense toward the lit base line
+            drift = (_noise1d(len(xs), max(L / W * 5, 2.0), sd + 3) - 0.5) * T * rng.uniform(0.3, 0.9)
+            spread = rng.uniform(-0.8, 0.3) * T * np.clip(u * rng.choice([-1.0, 1.0]) + 0.3, -1, 1)
+            off = base * T * 0.7 + drift + spread * 0.5
+            th = (rng.uniform(1.4, 3.6) * sc) * (0.6 + 0.8 * _noise1d(len(xs), max(L / W * 10, 3), sd + 5))
+            # opacity: comes and goes along the fibre; fibres are shorter than the streak, trailing ends
+            a_len = _noise1d(len(xs), max(L / W * 8, 3), sd + 7)
+            fa0, fa1 = sorted(rng.uniform(-1.0, 1.0, 2))
+            if fa1 - fa0 < 0.3:
+                fa1 = min(fa0 + 0.6, 1.0)
+            span = np.clip(np.minimum(u - fa0, fa1 - u) / (0.25 * (fa1 - fa0) + 1e-3), 0, 1) ** 1.5
+            a = np.clip((a_len - 0.25) / 0.55, 0, 1) * span * env * gate * rng.uniform(0.35, 1.0)
+            yy = yc + off
+            prof = np.exp(-((ys - yy[None, :]) / th[None, :]) ** 2) * a[None, :]
+            m = prof > dsub
+            dsub = np.maximum(dsub, prof)
+            vsub = np.where(m, np.clip(off / (1.3 * T), -1.5, 1.2)[None, :] * np.ones_like(prof), vsub)
+        sl = (slice(y0b, y1b), slice(x0b, x1b))
+        m = dsub > D[sl]
+        D[sl] = np.maximum(D[sl], dsub)
+        V[sl] = np.where(m, vsub, V[sl])
+    # a faint veil joining the fibres into one body (soft, no edge)
+    veil = cv2.GaussianBlur(D, (0, 0), 4.0 * sc) * 1.1 + cv2.GaussianBlur(D, (0, 0), 12.0 * sc) * 1.0
+    Vb = cv2.GaussianBlur(V * D, (0, 0), 3.0 * sc) / np.maximum(cv2.GaussianBlur(D, (0, 0), 3.0 * sc), 1e-4)
+    Vb = np.where(D > 0.02, V, Vb)
+    A = np.clip(D * 0.7 + veil * 0.8, 0, 1)
+    # colour: lit underside (gold / peach, hottest toward the sun), fibres above fade to lilac-rose
+    xs, ys = C.grid(W, H)
+    dist = np.sqrt((sun[0] - xs) ** 2 + (sun[1] - ys) ** 2) + 1e-3
+    prox = np.exp(-dist / (0.4 * W))[..., None]
+    low = C.smoothstep(-0.6, 0.9, Vb)[..., None]
+    top_c = np.array([0.72, 0.56, 0.78], np.float32) * lit + np.array([0.36, 0.28, 0.5], np.float32) * (1 - lit)
+    bot_c = np.array([1.2, 0.66, 0.5], np.float32) * (1 - prox) + np.array([1.3, 0.9, 0.55], np.float32) * prox
+    bot_c = bot_c * (0.55 + 0.45 * lit) + np.array([0.9, 0.4, 0.5], np.float32) * (1 - lit) * 0.45
+    col = top_c * (1 - low) + bot_c * low
+    col = C.lerp(col, sky, 0.15)
+    # the densest fibre cores are a little brighter (light scattering through the ice)
+    col = col * (0.9 + 0.2 * np.clip(D, 0, 1))[..., None]
+    alpha = A * (0.6 + 0.3 * lit)
+    return np.dstack([col, alpha]).astype(np.float32)

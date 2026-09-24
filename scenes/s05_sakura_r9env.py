@@ -50,7 +50,7 @@ def weather9(out, mat, bid, face, uo, Yo, so, layer, Zo, B, amt=1.0):
     # floor-line stains (every storey the slab edge drips a little)
     fy = np.mod(Y - B[b, 2] + 0.3, 2.8) / 2.8
     slab = streak * (1 - fy) ** 3 * 0.5
-    g = np.clip(0.28 * streak * run + 0.16 * soot + 0.12 * slab, 0, 0.4)
+    g = np.clip(0.07 * streak * run + 0.3 * soot + 0.03 * slab, 0, 0.4)     # round 19: fewer stripes, deeper eave shadow
     # damp plinth
     g += 0.12 * (1 - _ss(0.2, 0.7, base))
     # panel variation: per-panel (1.8 m x storey) value shift + seams on tall blocks

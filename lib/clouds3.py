@@ -4688,6 +4688,7 @@ def _deck_render(out, x0, y0, f, ppx, hy, ch, P, seed, Lx, Ly, Lz, soft, sig, si
             Wz = 0.0
             Wtop = 0.0
             Wsh = 0.0
+            Wy = 0.0
             jit = _h2(int(i + x0), int(j + y0), seed + 5)
             it = 0
             while T > 0.01 and it < 400:
@@ -4748,6 +4749,7 @@ def _deck_render(out, x0, y0, f, ppx, hy, ch, P, seed, Lx, Ly, Lz, soft, sig, si
                     Wz += w_ * Z
                     Wtop += w_ * min(max(1.0 - dd / (6 * soft), 0.0), 1.0)
                     Wsh += w_ * sh
+                    Wy += w_ * Y
                     T *= tr_
                 t += stp * (0.6 + 0.8 * jit) if it == 1 else stp
             A = 1.0 - T
@@ -4758,6 +4760,8 @@ def _deck_render(out, x0, y0, f, ppx, hy, ch, P, seed, Lx, Ly, Lz, soft, sig, si
                 out[j, i, 3] = Wz / A
                 out[j, i, 4] = Wtop / A
                 out[j, i, 5] = Wsh / A
+                if out.shape[2] > 6:
+                    out[j, i, 6] = Wy / A
             else:
                 out[j, i, 3] = zmax
 
@@ -4780,20 +4784,26 @@ def deck_fields(w, h, horizon_y, sun, fov=55.0, cam_h=1.0, seed=0, zmax=80.0, so
                   p['p3'][0], p['p3'][1], p['p4'][0], p['p4'][1], p['gap'][0], p['gap'][1], p['stretch']],
                  np.float64)
     x0, y0, x1, y1 = box if box is not None else (0, int(horizon_y) - 2, w, h)
-    out = np.zeros((y1 - y0, x1 - x0, 6), F32)
+    out = np.zeros((y1 - y0, x1 - x0, 7), F32)
     T = np.asarray(towers, np.float64).reshape(-1, 4)
     _deck_render(out, float(x0), float(y0), f, ppx, float(horizon_y), cam_h, P, seed, L[0], L[1], L[2], soft,
                  sig, sig_l, zmax, g[0], g[1], gmix, T, amb_k)
     return dict(sun=out[..., 0], amb=out[..., 1], A=out[..., 2], Z=out[..., 3], top=out[..., 4],
-                shadow=out[..., 5], box=(x0, y0, x1, y1), f=f, ppx=ppx, L=L)
+                shadow=out[..., 5], Y=out[..., 6], box=(x0, y0, x1, y1), f=f, ppx=ppx, L=L, cam_h=cam_h)
 
 
 def paint_deck(R, w, h, horizon_y, sun_x, k_sun=0.36, deep=(0.1, 0.11, 0.26), body=(0.38, 0.4, 0.62),
                sun_col=(1.35, 0.72, 0.3), rim_col=(1.5, 1.05, 0.55), haze_far=(0.74, 0.76, 0.92),
                haze_sun=(1.12, 0.92, 0.74), z_haze=40.0, haze_amt=0.8, near_dark=0.5, near_z=(1.2, 7.0),
                sun_w=0.32, rim_focus=0.55, kuwa=3, seed=0, shadow_col=(0.08, 0.07, 0.22), brush=0.04, near_soft=5.0,
-               rim_replace=0.6, near_rim=0.25, patches=0.35):
-    """Paint deck fields into an RGB image (h_box, w_box, 3) + alpha + depth."""
+               rim_replace=0.6, near_rim=0.25, patches=0.35, lit_edge=None, crown_col=None, crown_amt=0.0,
+               crown_px=10.0, under_col=None, under_amt=0.0,
+               crown_lo=-0.2, crown_hi=1.2, valley_amt=0.0, valley_col=(0.01, 0.01, 0.06)):
+    """Paint deck fields into an RGB image (h_box, w_box, 3) + alpha + depth.
+    lit_edge=(lo, hi): crisp painted step for the sunlit crown (instead of a linear ramp).
+    crown_col / crown_amt / crown_px: broad warm glow that hangs below each lit crest and fades into the
+    body (the lit crown as a value mass, not a contour line). under_col / under_amt: cool violet on the
+    down-facing shadow side (low ambient, below a crest)."""
     x0, y0, x1, y1 = R['box']
     A = R['A']
     ia = 1.0 / np.maximum(A, 1e-4)
@@ -4819,8 +4829,29 @@ def paint_deck(R, w, h, horizon_y, sun_x, k_sun=0.36, deep=(0.1, 0.11, 0.26), bo
     col = deep_ + (body_ - deep_) * (Am ** 1.5)[..., None]
     sh = R['shadow'][..., None]
     col = col * (0.55 + 0.45 * sh) + np.asarray(shadow_col, F32) * (1 - sh) * 0.3
+    if under_col is not None and under_amt:
+        un = (1 - Am) ** 2 * K._ss(0.0, 0.35, R['top'])
+        col = col + (np.asarray(under_col, F32) - col) * (un * under_amt)[..., None]
+    if (crown_col is not None and crown_amt) or valley_amt:
+        # relative height: each bank's crown vs its surroundings (screen-space local normalisation)
+        Yh = R['Y'] if 'Y' in R else None
+        if Yh is not None:
+            sg = max(crown_px * sc, 1.0)
+            Yb = cv2.GaussianBlur(Yh, (0, 0), sg)
+            dev = cv2.GaussianBlur(np.abs(Yh - Yb), (0, 0), sg) + 1e-3
+            hrel = (Yh - Yb) / dev
+            hrel = cv2.GaussianBlur(hrel.astype(F32), (0, 0), 1.0 * sc + 0.3)
+            if crown_col is not None and crown_amt:
+                cg = K._ss(crown_lo, crown_hi, hrel) * rim_gain
+                col = col + (np.asarray(crown_col, F32) - col) * (np.clip(cg, 0, 1) * crown_amt)[..., None]
+            if valley_amt:
+                vl = K._ss(-0.2, -1.4, hrel)
+                col = col * (1 - valley_amt * vl)[..., None] + np.asarray(valley_col, F32) * (valley_amt * vl)[..., None]
     hot = np.clip(s - 0.6, 0, None)
-    lit_ = np.clip(s / 0.6, 0, 1)[..., None]
+    if lit_edge is not None:
+        lit_ = K._ss(lit_edge[0], lit_edge[1], s)[..., None]
+    else:
+        lit_ = np.clip(s / 0.6, 0, 1)[..., None]
     col = col * (1 - rim_replace * lit_) + np.asarray(sun_col, F32) * lit_ * 0.6 +         np.asarray(rim_col, F32) * hot[..., None]
     # near deck falls into darker navy-violet (yn_02)
     nd = 1 - near_dark * (1 - K._ss(near_z[0], near_z[1], Z))

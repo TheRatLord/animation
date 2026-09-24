@@ -34,7 +34,7 @@ class Curtain:
         # amplitude varying across the panel (gathered bunches and flatter stretches)
         env = 0.65 + 0.35 * np.sin(2 * math.pi * 1.3 * u + ph * 1.7) + 0.2 * np.sin(2 * math.pi * 3.1 * u + ph)
         diag = 1.6 * vv * self.billow * (0.8 + 0.2 * math.sin(t * 0.6 + ph))
-        fold = self.amp * env * (np.sin(2 * math.pi * self.nfold * u + ph + diag * self.side
+        fold = 1.5 * self.amp * env * (np.sin(2 * math.pi * self.nfold * u + ph + diag * self.side
                                         + 0.4 * np.sin(t * 0.9 + v * 2.0 + ph))
                                  + 0.45 * np.sin(2 * math.pi * self.nfold * 2.17 * u + ph * 3.1 + 0.5 * t + 2.2 * v)
                                  + 0.2 * np.sin(2 * math.pi * self.nfold * 4.3 * u + ph * 5.0 - 0.8 * t + 3.0 * v))
@@ -105,7 +105,7 @@ def _shade_cloth(px, py, pz, nx, ny, nz, u, v, cx, cy, cz, P, VB, HB, out):
     glow = trans * 0.62 + dirl * 0.85
     # weave / seam texture along the fabric (vertical threads, a few denser stripes)
     thr = 0.5 + 0.5 * math.sin(u * 180.0 + math.sin(v * 9.0 + u * 13.0) * 1.5)
-    stripe = R._ss(0.8, 0.95, 0.5 + 0.5 * math.sin(u * 61.0 + 1.3))
+    stripe = R._ss(0.55, 0.95, 0.5 + 0.5 * math.sin(u * 23.0 + 1.3))
     dens = 1.0 + 0.06 * thr + 0.12 * stripe
     if v < 0.035:
         dens += 0.5                                # gathered header tape
@@ -119,7 +119,7 @@ def _shade_cloth(px, py, pz, nx, ny, nz, u, v, cx, cy, cz, P, VB, HB, out):
     # backlit rim on grazing folds facing the sun
     back = -(Lx * vx + Ly * vy + Lz * vz)
     if back > 0.0 and ap > 0.0:
-        rk = (1.0 - ndv) ** 3 * (0.4 + 0.6 * back) * ap * 2.2
+        rk = (1.0 - ndv) ** 3 * (0.4 + 0.6 * back) * ap * 1.4
         r += rk * 1.0
         g += rk * 0.62
         b += rk * 0.3

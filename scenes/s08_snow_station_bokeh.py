@@ -158,7 +158,7 @@ class Bokeh:
         amber = np.array([1.7, 1.15, 0.55], np.float32)
         col = cool * (1 - wk) + amber * wk
         a = (self.a * w * (1 + 0.25 * wk[:, 0])).astype(np.float32)
-        a = np.clip(a, 0, 0.45).astype(np.float32)
+        a = (np.clip(a, 0, 0.45) * 0.78).astype(np.float32)      # (cycle 7) shared montage bokeh strength
         screen_discs(img, uu.astype(np.float32), vv.astype(np.float32), R.astype(np.float32),
                      self.soft.astype(np.float32), col.astype(np.float32), a, self.rot)
         return img

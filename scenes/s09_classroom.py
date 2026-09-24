@@ -40,16 +40,16 @@ class _Boxes:
     def begin(self):
         self._g0 = len(self.rows)
 
-    def box(self, c, h, mat, var=0.0, yaw=0.0, noshadow=False):
+    def box(self, c, h, mat, var=0.0, yaw=0.0, noshadow=False, shape=0):
         self.rows.append([c[0], c[1], c[2], h[0], h[1], h[2], math.cos(yaw), math.sin(yaw), mat, var,
-                          1.0 if noshadow else 0.0])
+                          1.0 if noshadow else 0.0, float(shape)])
 
-    def part(self, origin, yaw, off, h, mat, var=0.0, noshadow=False):
+    def part(self, origin, yaw, off, h, mat, var=0.0, noshadow=False, shape=0):
         """box at local offset `off` of an object at `origin` rotated by yaw."""
         c, s = math.cos(yaw), math.sin(yaw)
         wx = origin[0] + c * off[0] + s * off[2]
         wz = origin[2] - s * off[0] + c * off[2]
-        self.box((wx, origin[1] + off[1], wz), h, mat, var, yaw, noshadow)
+        self.box((wx, origin[1] + off[1], wz), h, mat, var, yaw, noshadow, shape)
 
     def end(self):
         i0, i1 = self._g0, len(self.rows)
@@ -66,6 +66,9 @@ class _Boxes:
 
     def arrays(self):
         return np.array(self.rows, np.float64), np.array(self.groups, np.float64)
+
+
+JACKET_AT = {(3, 3)}
 
 
 def build_room(seed=5):
@@ -116,18 +119,31 @@ def build_room(seed=5):
     Bx.box((LX - 0.012, 1.55, 3.5), (0.012, 0.62, 2.35), R.M_BOARDFRAME)
     Bx.box((LX - 0.02, 1.55, 3.5), (0.012, 0.58, 2.3), R.M_BOARD)
     Bx.box((LX - 0.07, 0.92, 3.5), (0.06, 0.015, 2.3), R.M_TRAY)
+    # erasers + chalk sticks on the tray
+    Bx.box((LX - 0.075, 0.935 + 0.022, 2.05), (0.026, 0.022, 0.065), R.M_ERASER, yaw=0.08)
+    Bx.box((LX - 0.07, 0.935 + 0.022, 4.95), (0.026, 0.022, 0.065), R.M_ERASER, yaw=-0.12)
+    for i, (zc, cv_) in enumerate(((2.35, 0.1), (2.44, 0.6), (2.5, 0.1), (2.62, 0.85), (4.6, 0.3))):
+        Bx.box((LX - 0.06 - 0.012 * (i % 2), 0.935 + 0.006, zc), (0.006, 0.006, 0.035), R.M_CHALK,
+               var=cv_, yaw=0.2 * (i - 2), noshadow=True)
     Bx.box((LX - 0.03, 2.5, 3.5), (0.03, 0.15, 0.15), R.M_CLOCK)
     Bx.box((LX - 0.08, 2.72, 6.3), (0.08, 0.14, 0.2), R.M_SPEAKER)
     for i in range(7):
-        z = 0.75 + (i % 4) * 0.22 + rng.uniform(-0.02, 0.02)
-        y = 1.95 - (i // 4) * 0.36 + rng.uniform(-0.02, 0.02)
-        Bx.box((LX - 0.004, y, z), (0.003, 0.14, 0.1), R.M_PAPER, var=rng.random())
+        rng.uniform(-0.02, 0.02), rng.uniform(-0.02, 0.02), rng.random()     # keep the rng stream
     for i in range(5):
         z = 6.05 + (i % 3) * 0.3
         y = 1.9 - (i // 3) * 0.42
         Bx.box((LX - 0.004, y, z), (0.003, 0.18, 0.12), R.M_PAPER, var=rng.random())
     Bx.box((LX - 0.55, 0.1, 3.5), (0.55, 0.1, 2.6), R.M_PLATFORM)
-    Bx.box((LX - 0.75, 0.2 + 0.52, 3.4), (0.25, 0.52, 0.45), R.M_LECTERN)
+    # teacher's lectern (kyoutaku): panelled wooden body on a dark kick plinth, an overhanging top board,
+    # the attendance binder, a chalk box and a stack of printouts on top
+    lo_ = (LX - 0.75, 0.0, 3.4)
+    Bx.box((lo_[0], 0.2 + 0.035, lo_[2]), (0.235, 0.035, 0.435), R.M_LECTERN, var=0.05)
+    Bx.box((lo_[0], 0.27 + 0.47, lo_[2]), (0.25, 0.47, 0.45), R.M_LECTERN, var=0.5)
+    Bx.box((lo_[0] - 0.01, 1.21 + 0.016, lo_[2]), (0.285, 0.016, 0.49), R.M_LECTERN, var=0.95)
+    Bx.box((lo_[0] - 0.05, 1.242 + 0.012, lo_[2] - 0.22), (0.11, 0.012, 0.155), R.M_BOOK, var=0.0, yaw=0.12)
+    Bx.box((lo_[0] - 0.02, 1.242 + 0.005, lo_[2] + 0.16), (0.105, 0.005, 0.15), R.M_PAPER, var=0.02, yaw=-0.2)
+    Bx.box((lo_[0] - 0.02, 1.252 + 0.004, lo_[2] + 0.17), (0.105, 0.004, 0.15), R.M_NOTE, var=0.1, yaw=-0.1)
+    Bx.box((lo_[0] + 0.12, 1.242 + 0.025, lo_[2] + 0.02), (0.045, 0.025, 0.08), R.M_PCASE, var=0.4, yaw=0.3)
     Bx.end()
     # teacher's desk near the window
     Bx.begin()
@@ -159,8 +175,8 @@ def build_room(seed=5):
             if (ri, ci) in skip:
                 continue
             Bx.begin()
-            yaw = rng.normal(0, 0.03)
-            o = (xd + rng.normal(0, 0.03), 0.0, zd + rng.normal(0, 0.04))
+            yaw = float(np.clip(rng.normal(0, 0.065), -0.11, 0.11))           # +-3..6 deg
+            o = (xd + rng.normal(0, 0.05), 0.0, zd + rng.normal(0, 0.06))
             v = rng.random()
             Bx.part(o, yaw, (0, 0.705, 0), (0.225, 0.016, 0.315), R.M_DESKTOP, v)
             Bx.part(o, yaw, (0.02, 0.64, 0), (0.19, 0.045, 0.28), R.M_DESKMETAL)
@@ -173,18 +189,59 @@ def build_room(seed=5):
             if rng.random() < 0.2:          # a book left on the desk
                 Bx.part(o, yaw + rng.normal(0, 0.3), (rng.uniform(-0.05, 0.05), 0.73, rng.uniform(-0.1, 0.1)),
                         (0.1, 0.008, 0.14), R.M_BOOK, rng.random())
+            # lived-in clutter (own rng stream so the layout above stays put)
+            cr = np.random.default_rng(1000 + ri * 10 + ci)
+            sb = 1 if cr.random() < 0.5 else -1
+            if cr.random() < 0.45:          # bag hanging from the side hook, strap up to the hook
+                bv = cr.random()
+                Bx.part(o, yaw, (cr.uniform(-0.04, 0.04), 0.47, sb * 0.345), (0.15, 0.11, 0.045), R.M_BAG, bv)
+                Bx.part(o, yaw, (0.0, 0.62, sb * 0.335), (0.014, 0.055, 0.006), R.M_BAG, bv, noshadow=True)
+            if cr.random() < 0.4:           # notebooks, sometimes a small stack
+                nn = 1 + int(cr.random() < 0.35)
+                ny_ = 0.721
+                for k_ in range(nn):
+                    Bx.part(o, yaw + cr.normal(0, 0.25), (cr.uniform(-0.08, 0.06), ny_ + 0.004,
+                                                          cr.uniform(-0.14, 0.14)),
+                            (0.09, 0.004, 0.125), R.M_NOTE, cr.random())
+                    ny_ += 0.008
+            if cr.random() < 0.25:          # pencil case
+                Bx.part(o, yaw + cr.normal(0, 0.4), (cr.uniform(-0.12, 0.1), 0.721 + 0.017,
+                                                     cr.uniform(-0.2, 0.2)), (0.026, 0.017, 0.085),
+                        R.M_PCASE, cr.random(), shape=2)
+            if cr.random() < 0.62:          # textbook / printouts poking out of the book-box
+                zz = cr.uniform(-0.12, 0.12)
+                Bx.part(o, yaw + cr.normal(0, 0.1), (-0.19, 0.612, zz), (0.045, 0.01, 0.105), R.M_NOTE,
+                        cr.random(), noshadow=True)
+                if cr.random() < 0.7:
+                    Bx.part(o, yaw + cr.normal(0, 0.2), (-0.2, 0.627, zz + cr.uniform(-0.08, 0.08)),
+                            (0.05, 0.0015, 0.1), R.M_PAPER, 0.05, noshadow=True)
+            if cr.random() < 0.12:          # a bag dumped on the floor beside the desk
+                Bx.part(o, yaw + cr.normal(0, 0.5), (cr.uniform(-0.3, -0.1), 0.1, -sb * 0.42),
+                        (0.17, 0.1, 0.06), R.M_BAG, cr.random())
             # chair: behind the desk (lower x), sometimes pushed in, sometimes pulled out / turned
             pull = rng.choice([0.0, 0.08, 0.2, 0.32], p=[0.35, 0.3, 0.2, 0.15])
             cy = rng.normal(0, 0.16) + (rng.choice([0.55, -0.45, 0.3]) if rng.random() < 0.25 else 0)
+            if (ri, ci) in ((2, 4), (3, 1)):        # a couple of chairs left turned sideways, pulled out
+                cy, pull = (1.25 if ri == 2 else -1.1), 0.3
             co = (o[0] - 0.36 - pull, 0.0, o[2] + rng.normal(0, 0.05))
             cyaw = yaw + cy
             cv = rng.random()
             Bx.part(co, cyaw, (0, 0.42, 0), (0.19, 0.012, 0.19), R.M_CHAIRWOOD, cv)
-            Bx.part(co, cyaw, (-0.2, 0.72, 0), (0.012, 0.1, 0.18), R.M_CHAIRWOOD, cv)
+            # bent plywood back (SDF panel: curved in plan, arched top edge, rounded corners)
+            Bx.part(co, cyaw, (-0.2, 0.72, 0), (0.012 + R.BACK_BEND * 0.5 + 0.002, 0.1, 0.18), R.M_CHAIRWOOD, cv,
+                    shape=1)
             for sz in (-1, 1):
                 Bx.part(co, cyaw, (-0.205, 0.6, sz * 0.17), (0.011, 0.19, 0.011), R.M_CHAIRMETAL)
                 for sx in (-1, 1):
                     Bx.part(co, cyaw, (sx * 0.17, 0.2, sz * 0.17), (0.011, 0.2, 0.011), R.M_CHAIRMETAL)
+            if (ri, ci) in JACKET_AT:
+                # blazer thrown over the chair back: shoulders on the rail, body hanging behind,
+                # a sleeve dangling, the lining side toward the seat
+                jv = 0.3
+                Bx.part(co, cyaw, (-0.2, 0.835, 0.0), (0.03, 0.014, 0.2), R.M_JACKET, jv)
+                Bx.part(co, cyaw, (-0.232, 0.62, 0.01), (0.009, 0.22, 0.205), R.M_JACKET, jv)
+                Bx.part(co, cyaw, (-0.17, 0.72, -0.01), (0.008, 0.11, 0.19), R.M_JACKET, jv + 0.2)
+                Bx.part(co, cyaw, (-0.25, 0.5, 0.17), (0.02, 0.2, 0.035), R.M_JACKET, jv + 0.4)
             Bx.end()
     B, G = Bx.arrays()
     return B, G, np.array(VB, np.float64), np.array(HB, np.float64)
@@ -306,8 +363,23 @@ def board_tex(ppm, seed=3):
                for u in np.linspace(0, 1, 12)]
         cv2.polylines(sm, [np.array(pts, np.int32)], False, float(rng.uniform(0.04, 0.1)), int(0.1 * ppm),
                       cv2.LINE_AA)
+    # a few broad, half-erased eraser arcs (brighter chalk-dust clouds) and dust along the bottom edge
+    for i in range(7):
+        z0 = rng.uniform(1.3, 5.6)
+        y0 = rng.uniform(1.0, 2.1)
+        ln = rng.uniform(0.3, 0.7)
+        amp = rng.uniform(0.03, 0.08)
+        pts = [(int((z0 + ln * u) * ppm), int((R.HC - y0 - amp * math.sin(u * 3.14)) * ppm))
+               for u in np.linspace(0, 1, 16)]
+        cv2.polylines(sm, [np.array(pts, np.int32)], False, float(rng.uniform(0.12, 0.22)), int(0.11 * ppm),
+                      cv2.LINE_AA)
     sm = C.blur(sm, 0.03 * ppm)
-    return np.clip(T * 0.9 + sm, 0, 1).astype(np.float32)
+    ys = (np.arange(h, dtype=np.float32)[:, None] + 0.5) / ppm
+    yy = R.HC - ys
+    dustb = np.exp(-np.maximum(yy - 0.95, 0) / 0.09) * (yy > 0.93) * 0.22
+    dustb = dustb * (0.5 + 0.9 * C.fbm(w, h, max(4.0, w / (0.08 * ppm)), 3, seed=seed + 9))
+    sm = sm * (0.6 + 0.7 * C.fbm(w, h, max(4.0, w / (0.05 * ppm)), 3, seed=seed + 7))
+    return np.clip(T * 0.9 + sm + dustb, 0, 1).astype(np.float32)
 
 
 class Scene:
@@ -325,8 +397,13 @@ class Scene:
         self.B, self.G, self.VB, self.HB = build_room()
         self.fao_ppm = 110.0
         self.FAO = floor_ao(self.B, self.fao_ppm)
-        self.bt_ppm = 260.0
-        self.BT = board_tex(self.bt_ppm)
+        self.bt_ppm = 300.0
+        chalk = board_tex(self.bt_ppm)
+        import s09_classroom_wall as WD
+        dec = WD.wall_decals(self.bt_ppm, R.LZ, R.HC)
+        hh_, ww_ = chalk.shape
+        dec = cv2.resize(dec, (ww_, hh_), interpolation=cv2.INTER_AREA) if dec.shape[:2] != (hh_, ww_) else dec
+        self.BT = np.ascontiguousarray(np.concatenate([chalk[..., None], dec], -1).astype(np.float32))
         self.sky_ppu = 1250.0 * k
         self.SKY, _ = O.sky_plate(self.sky_ppu, self.sun_uv)
         self.tppm = 130.0 * k
@@ -336,7 +413,7 @@ class Scene:
         self.CM = np.zeros((int(R.HC * self.cm_ppm), int(R.LX * self.cm_ppm)), np.float32)
         sun = np.array([1.0, 0.7, 0.42]) * 3.0
         amb = np.array([0.38, 0.45, 0.7]) * 1.55
-        self.P = np.array([L[0], L[1], L[2], sun[0], sun[1], sun[2], amb[0], amb[1], amb[2], 0.8, 0.35],
+        self.P = np.array([L[0], L[1], L[2], sun[0], sun[1], sun[2], amb[0], amb[1], amb[2], 0.8, 0.35, 0.0],
                           np.float64)
         self.jit = ((np.add.outer(np.arange(64), np.arange(64) * 0.618) * 0.754877) % 1.0)
         self.vol_k = 0.24
@@ -344,7 +421,7 @@ class Scene:
         self.sub = None
         self.emask = None
         self.flare = None
-        self.dust = X.make_dust(900)
+        self.dust = self.spawn_dust()
         self.curtains = [K.Curtain(0.55, 0.98, 5, 0.05, 0.14, 1, 0.3),
                          K.Curtain(2.76, 3.75, 7, 0.03, 0.8, 1, 0.0),
                          K.Curtain(4.8, 5.3, 5, 0.03, 0.55, 1, 1.7),
@@ -363,6 +440,34 @@ class Scene:
         sxp, syp = xs + 0.5 - W / 2, H / 2 - (ys + 0.5)
         self.zfac = (self.fpx / np.sqrt(self.fpx ** 2 + sxp ** 2 + syp ** 2)).astype(np.float32)
 
+    def spawn_dust(self, n_beam=620, n_amb=140, seed=11):
+        """Motes seeded where they will glitter: inside the sunbeams (mostly the shafts from the centre
+        window toward the blackboard), plus a few dim ones at the beam fringes."""
+        rng = np.random.default_rng(seed)
+        N = 60000
+        pos = np.stack([rng.uniform(0.8, 8.6, N), rng.uniform(0.2, 2.8, N), rng.uniform(0.25, 6.0, N)], 1)
+        L = self.L
+        tw = -pos[:, 2] / L[2]
+        xw = pos[:, 0] + L[0] * tw
+        yw = pos[:, 1] + L[1] * tw
+        a = np.array([R.aperture(float(x), float(y), 0.004 + float(t_) * 0.012, self.VB, self.HB)
+                      for x, y, t_ in zip(xw, yw, tw)])
+        cam = self.camera(DURATION / 2)
+        rel = pos - cam[:3]
+        zc = rel @ cam[3:6]
+        sx = 0.5 + (rel @ cam[6:9]) / np.maximum(zc, 1e-3) * self.fpx / self.W
+        sy = 0.5 - (rel @ cam[9:12]) / np.maximum(zc, 1e-3) * self.fpx / self.W * (self.W / self.H)
+        ok = (zc > 0.8) & (sx > -0.02) & (sx < 1.02) & (sy > -0.02) & (sy < 1.02)
+        reg = np.exp(-((sx - 0.68) / 0.16) ** 2 - ((sy - 0.46) / 0.22) ** 2)
+        wb = np.where(ok & (a > 0.45), (0.25 + 3.0 * reg) * a, 0.0)
+        ib = rng.choice(N, n_beam, replace=False, p=wb / wb.sum())
+        wa = np.where(ok & (a > 0.05) & (a <= 0.45), 1.0, 0.0)
+        ia = rng.choice(N, n_amb, replace=False, p=wa / wa.sum())
+        P = X.make_dust(0, seed=seed, pos=pos[np.concatenate([ib, ia])])
+        P[:, 3:6] *= 2.2                                          # visible drift / tumbling through the beam
+        P[:, 9] = 0.35 + 0.65 * rng.random(len(P)) ** 1.5
+        return P
+
     def shape_vol(self, vol):
         # compress the hot core near the sun, then boost the beam structure (shafts with dark gaps)
         W = self.W
@@ -376,9 +481,11 @@ class Scene:
         p0 = np.array([0.95, 1.18, 6.1])
         tgt = np.array([6.4, 0.95, 0.2])
         f = _norm(tgt - p0)
-        pos = p0 + f * (1.15 * u)
+        rt_ = _norm(np.cross(f, (0, 1, 0)))
+        # slow eased lateral dolly (left -> right across the aisle) + a push-in toward the windows
+        pos = p0 + f * (0.95 * u) + rt_ * (0.85 * (u - 0.5))
         pos = pos + np.array([0.0, 0.01 * math.sin(t * 0.6), 0.0])
-        yaw_extra = 0.015 * u
+        yaw_extra = 0.05 * (u - 0.5)
         c, s = math.cos(yaw_extra), math.sin(yaw_extra)
         f = _norm((f[0] * c + f[2] * s, f[1] - 0.012 * u, -f[0] * s + f[2] * c))
         r = _norm(np.cross(f, (0, 1, 0)))
@@ -388,6 +495,7 @@ class Scene:
     def frame(self, t):
         W, H = self.W, self.H
         cam = self.camera(t)
+        self.P[11] = t
         meshes = [c.verts(t) for c in self.curtains]
         K.shadow_mask(meshes, self.L, self.CM, self.cm_ppm, self.cm_y0)
         col = np.zeros((H, W, 3), np.float32)
@@ -403,7 +511,7 @@ class Scene:
         # adaptive AA on edges / shadow boundaries
         if self.emask is None:
             self.emask = np.zeros((H, W), np.uint8)
-        X.edges(col, 0.12, self.emask)
+        X.edges(col, 0.15, self.emask)
         ys, xs = np.nonzero(self.emask)
         R.render_aa(W, H, cam, self.fpx, *args, ys.astype(np.int64), xs.astype(np.int64), col, alb, direct, rw)
         # glossy reflections: blurred at half res (stretched vertically, like a polished floor)
@@ -412,12 +520,12 @@ class Scene:
         rwh = cv2.resize(rw, (w2, h2), interpolation=cv2.INTER_AREA)
         np.multiply(refl, rw[..., None], out=refl)
         rfh = cv2.resize(refl, (w2, h2), interpolation=cv2.INTER_AREA)
-        rfh = cv2.GaussianBlur(rfh, (0, 0), sigmaX=1.3 * k, sigmaY=4.5 * k)
-        rwh = cv2.GaussianBlur(rwh, (0, 0), sigmaX=1.3 * k, sigmaY=4.5 * k)
+        rfh = cv2.GaussianBlur(rfh, (0, 0), sigmaX=1.1 * k, sigmaY=11.0 * k)
+        rwh = cv2.GaussianBlur(rwh, (0, 0), sigmaX=1.1 * k, sigmaY=11.0 * k)
         reflb = cv2.resize(rfh, (W, H), interpolation=cv2.INTER_LINEAR)
         rwb = cv2.resize(rwh, (W, H), interpolation=cv2.INTER_LINEAR)
         # screen-space bounce light (sunlit patches glow onto everything around them)
-        gi = F.fast_blur(direct, 0.06 * W) * 0.55 + F.fast_blur(direct, 0.015 * W) * 0.25
+        gi = F.fast_blur(direct, 0.06 * W) * 0.75 + F.fast_blur(direct, 0.015 * W) * 0.3
         img = np.empty_like(col)
         X.combine1(col, reflb, rwb, rw, gi, alb, img)
         # curtains (rasterised cloth, 4x coverage AA, z-tested against the ray-traced scene)
@@ -469,14 +577,30 @@ class Scene:
                              H / 2 - self.fpx * (self.Lvis @ c2[9:12]) / Ld2)
             self.flare = F.anime_flare(W, H, self.flare_xy[0], self.flare_xy[1], intensity=1.0,
                                        tint=(1.0, 0.8, 0.55), rays=12, ray_len=0.11, spike_width=0.022,
-                                       starburst=2.0, hair=0.0, ghosts=3.0, halo=1.4, glow=1.3, streak=0.35)
+                                       starburst=2.0, hair=0.0, ghosts=0.0, halo=1.15, glow=1.0, streak=0.35)
             self.flare += X.starburst(W, H, self.flare_xy[0], self.flare_xy[1]) * 1.1
             self.flare += X.hex_ghosts(W, H, self.flare_xy[0], self.flare_xy[1])
         M = np.float32([[1, 0, lx - self.flare_xy[0]], [0, 1, ly - self.flare_xy[1]]])
         fl = cv2.warpAffine(self.flare, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
         X.combine2(img, vol, fl, 0.4 + 0.6 * vis, self.vol_k, np.array([1.0, 0.78, 0.5]), 1.0)
         X.dust(img, depth, cam, self.fpx, self.dust, t, self.L, self.VB, self.HB, self.CM, self.cm_ppm, self.cm_y0,
-               np.array([1.0, 0.85, 0.62]), 0.9)
+               np.array([1.0, 0.85, 0.62]), 2.6)
         img = X.bloom_half(img, threshold=0.85, knee=0.4, strength=0.38, halation=0.45)
         img = F.shoulder(img, 0.8, desat=0.2)
-        return F.finish_fast(img, t, sat=1.1, grain_amt=0.004, vig=0.25, ca=0.0)
+        img = F.finish_fast(img, t, sat=1.1, grain_amt=0.004, vig=0.25, ca=0.0)
+        return self.lift_darks(img)
+
+    def lift_darks(self, img):
+        """Painted shadows never go dead: lift the darkest values into a saturated blue-violet, warmed
+        to ochre where the shadows sit next to sunlit floor / desks (bounce light)."""
+        H, W = img.shape[:2]
+        lum = img[..., 0] * 0.2126 + img[..., 1] * 0.7152 + img[..., 2] * 0.0722
+        sm = cv2.resize(lum, (W // 8, H // 8), interpolation=cv2.INTER_AREA)
+        hot = np.clip((sm - 0.45) * 2.5, 0, 1)
+        warm = cv2.GaussianBlur(hot, (0, 0), 0.012 * W / 8 * 4)
+        warm = np.clip(cv2.resize(warm, (W, H), interpolation=cv2.INTER_LINEAR) * 3.0, 0, 1)
+        k = np.clip(1.0 - lum / 0.3, 0, 1) ** 2
+        vio = np.array([0.085, 0.07, 0.15], np.float32)
+        och = np.array([0.15, 0.095, 0.05], np.float32)
+        lift = vio[None, None] + (och - vio)[None, None] * (0.75 * warm)[..., None]
+        return np.clip(img + lift * k[..., None], 0, 1).astype(np.float32)

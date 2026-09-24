@@ -31,7 +31,7 @@ def heap(P, cx, by, Hc, seed, wd=1.0):
     its light (form high) -> one continuous terminator, big flat lit planes."""
     rng = np.random.default_rng(seed)
     g = (cx + 0.06 * Hc * wd, by - 0.46 * Hc, 0.5 * Hc * wd, 0.58 * Hc)
-    base = dict(group=g, form=0.78, scallop=1.5, levels=LEV, wrap=0.3, term_w=0.07, rim_interior=0.0, side_scale=0.72,
+    base = dict(group=g, form=0.6, scallop=1.5, levels=LEV, wrap=0.3, term_w=0.07, rim_interior=0.0, side_scale=0.72,
                 split=0.3, lit_step=0.55, term=0.6, hot=0.85, term_noise=0.2, concave=0.55, clump=0.5,
                 inner=0, sky=0.16, bounce_group=0.25, cast=0.35, shade_top=0.45, valley_dark=0.25)
 
@@ -69,29 +69,69 @@ def heap(P, cx, by, Hc, seed, wd=1.0):
       haze=0.06, haze_grad=0.35)
 
 
-def _heap(pw, ph, sun, x0, by, Hc, seed, u, width=1.0, mirror=False):
+def _heap(pw, ph, sun, x0, by, Hc, seed, u, width=1.0, mirror=False, ph_key=None):
     if mirror:
         sun = (pw - 1 - sun[0], sun[1])
         x0 = pw - 1 - x0
-    key = (sun[0], sun[1] - KEY_UP * ph)
+    key = (sun[0], sun[1] - KEY_UP * (ph if ph_key is None else ph_key))
     P = K.Painter(pw, ph, key, PAL, u, seed=seed + 1, sun_z=SUN_Z)
     heap(P, x0, by, Hc, seed, width)
     rng = np.random.default_rng(seed + 5)
     P.wisps(x0 - 0.62 * Hc * width, x0 + 0.62 * Hc * width, by + 0.02 * Hc, 0.12 * Hc, rng=rng, pal=PAL,
             seed=seed + 11, amount=0.6, erode=1.2, base_haze=0.45, haze_color='#eaa0b0')
-    P.lining(1.1, rim_px=2.8, halo=0.8, backlit=0.35)
-    rgba = P.rgba()
+    P.lining(1.0, rim_px=2.2, halo=0.25, backlit=0.08)
+    rgba = _soft_shade_edges(_soften_planes(P.rgba(), u), u)
     if mirror:
         rgba = np.ascontiguousarray(rgba[:, ::-1])
     return rgba
+
+
+def _soften_planes(rgba, u):
+    """internal plane boundaries painted wet-into-wet: inside the silhouette the flat cel planes are blended
+    toward an alpha-normalised blur of themselves (no sky bleeds in), strongly in the mid / shade values and
+    lightly in the bright lit planes, so only the lit top edges and the sun-side silhouette stay crisp."""
+    A = np.clip(rgba[..., 3], 0, 1)
+    rgb = rgba[..., :3]
+    pm = rgb * A[..., None]
+    out = rgba.copy()
+    acc = np.zeros_like(rgb)
+    for sg, wt in ((4.0, 0.55), (11.0, 0.45)):
+        num = cv2.GaussianBlur(pm, (0, 0), sg * u)
+        den = cv2.GaussianBlur(A, (0, 0), sg * u)
+        acc += wt * num / np.maximum(den, 1e-4)[..., None]
+    lum = rgb.max(-1)
+    lit = C.smoothstep(0.78, 0.95, lum) * C.smoothstep(0.1, 0.3, rgb[..., 0] - rgb[..., 2])
+    inner = C.smoothstep(0.5, 0.98, cv2.GaussianBlur(A, (0, 0), 3.0 * u))
+    k = inner * (0.68 - 0.42 * lit)
+    out[..., :3] = rgb + (acc - rgb) * k[..., None]
+    return out
+
+
+def _soft_shade_edges(rgba, u):
+    """lost edges on the shade side: where the cloud paint is cool / unlit (and on down-facing edges) the
+    silhouette dissolves over a few px into the sky; lit (warm, bright) edges stay crisp."""
+    A = rgba[..., 3]
+    rgb = rgba[..., :3]
+    lit = C.smoothstep(0.62, 0.86, rgb.max(-1)) * C.smoothstep(0.0, 0.25, rgb[..., 0] - rgb[..., 2])
+    litb = cv2.GaussianBlur(lit * A, (0, 0), 6 * u) / np.maximum(cv2.GaussianBlur(A, (0, 0), 6 * u), 1e-4)
+    Ab = 0.6 * cv2.GaussianBlur(A, (0, 0), 3 * u) + 0.4 * cv2.GaussianBlur(A, (0, 0), 7 * u)
+    gy, gx = np.gradient(cv2.GaussianBlur(A, (0, 0), 8 * u))
+    gm = np.hypot(gx, gy) + 1e-6
+    down = C.smoothstep(0.2, 0.9, gy / gm)
+    w = np.clip((1 - litb) * 1.0 + down * 0.7, 0, 1)
+    soft = np.minimum(A, np.clip(Ab * 1.15 - 0.15, 0, 1) ** 1.3)
+    out = rgba.copy()
+    out[..., 3] = A * (1 - w) + soft * w
+    return out
 
 
 def cumulus(pw, ph, sun, W, H, ox, oy, seed=61):
     """two sunset heaps flanking the low sun -> straight RGBA plate (plate px)."""
     Hs = H / 1080.0
     u = W / 1920.0
-    a = _heap(pw, ph, sun, 0.205 * W + ox, 0.39 * H + oy, 390 * Hs, 71, u, width=1.35)
-    b = _heap(pw, ph, sun, 0.9 * W + ox, 0.405 * H + oy, 370 * Hs, 77, u, width=1.3, mirror=True)
+    pk = int(H * 1.08)       # key-light offset relative to the nominal plate height (plate may be taller)
+    a = _heap(pw, ph, sun, 0.205 * W + ox, 0.39 * H + oy, 390 * Hs, 71, u, width=1.35, ph_key=pk)
+    b = _heap(pw, ph, sun, 0.9 * W + ox, 0.405 * H + oy, 370 * Hs, 77, u, width=1.3, mirror=True, ph_key=pk)
     return _over(a, b)
 
 

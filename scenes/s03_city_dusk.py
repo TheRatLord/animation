@@ -29,8 +29,15 @@ import s03_city_dusk_paper as PAPER  # noqa: E402
 
 DURATION = 5.5
 # round 10: palette family per hero tower (screen x -> s03_city_dusk_city.PALS row)
-HERO_FAM = {0.575: 0, 0.79: 5, 0.87: 2, 0.95: 7, 0.755: 4, 0.84: 1, 0.965: 0, 0.53: 3}
-NAME_P = 0.2       # share of near mid-rise roofs with a rooftop name board
+HERO_FAM = {0.575: 11, 0.79: 12, 0.87: 2, 0.95: 10, 0.755: 4, 0.84: 1, 0.965: 8, 0.53: 6}
+# round 12: towers carrying painted sky reflections -> variant (0 peach cumulus, 1 violet-blue sky, 2 gold, 3 teal)
+HERO_CLOUD = {0.87: 3, 0.575: 1, 0.755: 1, 0.965: 2, 0.53: 0}
+GLINT = {0.87: 0.8, 0.575: 0.62, 0.755: 0.45}   # round 14: hot gold glint on the sun-side corner (peak height q)
+TT_SX, TT_Z, TT_H = 0.338, 2300.0, 333.0   # round 14: Tokyo Tower (screen x fraction, depth m, height m)
+# round 14: parks / shrine groves cleared out of the block grid and planted (x0, x1, z0, z1) in world metres
+GROVES = [(30.0, 150.0, 2030.0, 2330.0), (190.0, 260.0, 1560.0, 1690.0), (-480.0, -330.0, 2700.0, 2950.0),
+          (330.0, 520.0, 3300.0, 3650.0), (-260.0, -120.0, 3900.0, 4250.0), (-160.0, -50.0, 1330.0, 1420.0)]
+NAME_P = 0.3       # share of near mid-rise roofs with a rooftop name board
 
 HZ = 0.56           # horizon (fraction of H)
 FOC = 2.2           # focal length (fraction of W): telephoto compression
@@ -47,7 +54,11 @@ BANDS = [900.0, 1400.0, 2000.0, 2800.0, 3600.0, 5000.0, 8000.0, 40000.0]
 # street grid (m): x-period, street width, x offset, z-period, street width, z offset
 STREET = (84.0, 12.0, -46.0, 62.0, 10.0, 0.0)
 SOD = (0.8, 0.38, 0.26)
-AVENUE = (-54.0, -26.0)   # round 6: a wide boulevard (widened grid street) running straight toward the afterglow
+AVENUE = (100.0, -0.12, 14.0)   # round 11: diagonal boulevard, centre x = A0 + A1 * (z - 1000), half width (m)
+
+
+def avenue_x(z):
+    return AVENUE[0] + AVENUE[1] * (z - 1000.0)
 
 
 def row_ox(zb):
@@ -60,10 +71,13 @@ def row_ox(zb):
 
 
 def _sky_preset():
-    return dict(stops=[(0.0, '#16277a'), (0.22, '#283a9c'), (0.42, '#574cb2'), (0.58, '#9c5cb6'),
-                       (0.70, '#dc5f9e'), (0.80, '#ff6a70'), (0.88, '#ff6e3e'), (0.95, '#ff8124'),
-                       (1.0, '#ff9530')],
-                sun_glow='#ffa04a', sun_glow_amt=0.22, below='#ff9530', band=('#ffab48', 0.14))
+    # round 13: deeper teal-blue zenith into lilac (yn_09); the hot pink is held to a narrow band above the
+    # horizon glow instead of a magenta upper half
+    # round 14: the lilac is a narrow band between the blue and the peach (it was a wash over the upper half)
+    return dict(stops=[(0.0, '#10305f'), (0.22, '#1a4a7e'), (0.45, '#3a67a3'), (0.6, '#6480b8'),
+                       (0.71, '#9a8cc0'), (0.8, '#d08fae'), (0.87, '#f5928a'), (0.925, '#ff9656'),
+                       (0.965, '#ffa446'), (1.0, '#ffb050')],
+                sun_glow='#ffa04a', sun_glow_amt=0.14, below='#ff9530', band=('#ffab48', 0.1))
 
 
 class City:
@@ -82,10 +96,12 @@ class City:
         self.spires = []     # (x, z, y0, y1, w0) thin spires drawn onto the band plates
         self.clocks = []     # (x, y, z, r) clock faces
         self.name_cands = []  # roofs that may carry a rooftop name board (added after generation)
+        self.trees = []       # round 14: (x, z, canopy top y, radius, seed) tree canopies (parks, groves, lots)
         self.cur_pal = 0
         self.ntower = 0
         self.rng5 = np.random.default_rng(seed + 4000)   # round-10 tower palettes (keeps the layout streams)
         self._generate()
+        self._open_lots()
         self._name_boards()
 
     # ------------------------------------------------------------------ helpers
@@ -94,7 +110,7 @@ class City:
 
     def add(self, x0, x1, z0, z1, h, mat, alb, flh=3.5, bay=3.0, wwf=0.6, whf=0.5, lit0=0.0, litadd=0.0,
             litcol=0.5, glass=1.0, base=0.0, grp=1, sign=0.0, runf=1, rooft=0, crown=0.0, parent=None, seed=None,
-            pal=None):
+            pal=None, rk=0, rs=0.0):
         rec = np.zeros(K.NB)
         if pal is None:
             pal = self.cur_pal if parent is not None else 0
@@ -110,6 +126,7 @@ class City:
             lit0, litadd = lit0 * 0.45, min(litadd * 1.45 + lit0 * 0.55, 0.95)
         rec[[K.LIT0, K.LITADD, K.LITCOL, K.GLASS, K.BASE]] = lit0, litadd, litcol, glass, base
         rec[[K.GRP, K.SIGN, K.RUNF, K.ROOFT, K.CROWN]] = grp, sign, runf, rooft, crown
+        rec[[K.RK, K.RS]] = rk, rs
         sk = (z0 if parent is None else parent[0], 0 if parent is None else parent[1] + 1)
         self.rows.append((sk, rec))
         return (z0 if parent is None else parent[0], sk[1])
@@ -120,14 +137,21 @@ class City:
             c = [(0.75, 0.85, 1.05), (1.05, 1.02, 1.0), (0.62, 0.68, 0.88), (1.1, 1.0, 0.9), (0.5, 0.55, 0.72)][
                 r.integers(0, 5)]
         else:
-            c = [(1.12, 1.0, 0.84),    # concrete beige
-                 (1.3, 1.27, 1.22),    # white tile
-                 (0.85, 0.87, 0.95),   # grey
+            c = [(1.3, 1.15, 0.95),    # concrete beige
+                 (1.62, 1.58, 1.52),   # white tile
+                 (0.9, 0.9, 0.95),     # grey
                  (0.62, 0.52, 0.5),    # dark brown
-                 (1.0, 0.64, 0.54),    # brick
-                 (1.22, 1.12, 0.92),   # cream
-                 (0.55, 0.6, 0.78),    # dark blue-grey
-                 (0.95, 0.95, 1.05)][r.integers(0, 8)]
+                 (1.05, 0.66, 0.54),   # brick
+                 (1.45, 1.33, 1.1),    # cream
+                 (0.6, 0.62, 0.68),    # dark blue-grey
+                 (1.1, 1.04, 0.98)][r.integers(0, 8)]      # warm grey
+            # round 12: a wider paint box from its own stream (sea-green / pink tile, terracotta, charcoal,
+            # sky-blue panels, sand) and a wider value spread, so neighbouring blocks never share one face
+            q = self.rng4
+            if q.random() < 0.45:
+                c = [(0.78, 1.02, 0.92), (1.5, 1.12, 1.08), (1.25, 0.72, 0.5), (0.46, 0.46, 0.52),
+                     (0.95, 1.02, 1.1), (1.4, 1.2, 0.85), (1.7, 1.66, 1.6), (0.72, 0.64, 0.6)][int(q.integers(0, 8))]
+            return np.array(c) * q.uniform(0.72, 1.3)
         return np.array(c) * r.uniform(0.8, 1.2)
 
     def pal_code(self, fam=None, mat=None):
@@ -179,7 +203,7 @@ class City:
         if mat == K.M_APT:
             return dict(flh=r.uniform(2.8, 3.1), bay=r.uniform(3.5, 6.0), wwf=r.uniform(0.6, 0.8),
                         whf=r.uniform(0.45, 0.6), lit0=r.uniform(0.08, 0.16), litadd=r.uniform(0.3, 0.45),
-                        litcol=0.75, grp=2, runf=1)
+                        litcol=0.4, grp=2, runf=1)
         if mat == K.M_FINS:
             return dict(flh=r.uniform(3.6, 4.2), bay=r.uniform(1.2, 1.8), wwf=r.uniform(0.5, 0.62),
                         whf=r.uniform(0.82, 0.92), lit0=r.uniform(0.03, 0.07), litadd=r.uniform(0.3, 0.45),
@@ -188,9 +212,9 @@ class City:
             return dict(flh=r.uniform(3.4, 3.9), bay=r.uniform(1.6, 2.4), wwf=0.96, whf=r.uniform(0.42, 0.55),
                         lit0=r.uniform(0.04, 0.08), litadd=r.uniform(0.3, 0.45), litcol=0.3,
                         grp=int(r.choice([8, 16])), runf=int(r.integers(1, 3)))
-        return dict(flh=r.uniform(3.2, 3.8), bay=r.uniform(2.6, 5.0), wwf=r.uniform(0.45, 0.7),
+        return dict(flh=r.uniform(3.2, 3.8), bay=r.uniform(2.6, 5.0), wwf=r.uniform(0.5, 0.8),
                     whf=r.uniform(0.4, 0.6), lit0=r.uniform(0.06, 0.14), litadd=r.uniform(0.3, 0.45),
-                    litcol=0.55, grp=int(r.choice([3, 8, 20])), runf=1)
+                    litcol=0.3, grp=int(r.choice([3, 8, 20])), runf=1)
 
     def roof_clutter(self, pid, x0, x1, z0, z1, h, hm, alb):
         """Stair housings, water tanks, AC units, lattice antennas, fences, billboard frames."""
@@ -208,8 +232,8 @@ class City:
             self.add(ix0, ix1, iz0, iz1, top, mat, a, base=base, parent=pid, **kw)
 
         # stair / elevator housing
-        if r.random() < 0.8:
-            sw_, sd_ = min(r.uniform(3.5, 6.0), w * 0.45), min(r.uniform(3.5, 6.0), d * 0.45)
+        if r.random() < 0.55:
+            sw_, sd_ = min(r.uniform(2.5, 8.0), w * 0.5), min(r.uniform(2.5, 7.0), d * 0.45)
             sx_ = x0 + r.uniform(0.08, 0.92 - sw_ / w) * w
             sz_ = z0 + r.uniform(0.15, 0.9 - sd_ / d) * d
             item(sx_, sx_ + sw_, sz_, sz_ + sd_, h + r.uniform(2.8, 4.0), K.M_PLAIN, alb * 0.95)
@@ -296,18 +320,51 @@ class City:
             cz_ = z0 + r4.uniform(0.3, 0.9 - cw_ / d) * d if d > cw_ / 0.6 else z0 + 0.2 * d
             item(cx_, cx_ + cw_, cz_, cz_ + cw_ * 0.8, h + r4.uniform(2.5, 3.5), K.M_TANK, dark * 1.2)
         # billboard frame facing the camera
-        if r.random() < 0.06 and w > 12:
+        if (r.random() < 0.06 or (z0 < 3800 and self.rng4.random() < 0.17)) and w > 12:
             bw = w * r.uniform(0.5, 0.8)
             bx = x0 + r.uniform(0.05, 0.95 - bw / w) * w
             bz = z0 + d * r.uniform(0.3, 0.6)
             bh = r.uniform(5, 8)
             item(bx, bx + bw, bz, bz + 0.8, h + 2.2, K.M_FENCE, dark)
-            item(bx, bx + bw, bz, bz + 0.5, h + 2.2 + bh, K.M_BILL, pale, base=h + 2.2,
-                 lit0=1.0 if r.random() < 0.6 else 0.0)
+            # round 13: printed / lit posters only along the street canyons (and not all of them there);
+            # elsewhere the frame stands as bare rooftop steel
+            lit_ = 1.0 if r.random() < 0.6 else 0.0
+            hk_ = (math.sin(bx * 12.9898 + bz * 78.233) * 43758.5453) % 1.0
+            poster = self._canyon(x0, x1, z0, 65.0, 45.0) and hk_ < 0.9
+            item(bx, bx + bw, bz, bz + 0.5, h + 2.2 + bh, K.M_BILL if poster else K.M_FENCE,
+                 pale if poster else dark, base=h + 2.2, lit0=lit_)
 
-    def building(self, x0, x1, z0, z1, h, clutter=True):
-        if x1 > AVENUE[0] - 1.0 and x0 < AVENUE[1] + 1.0 and z0 < 14000:
-            return None     # keep the boulevard open (before any RNG draw: the layout stream is unchanged)
+    def building(self, x0, x1, z0, z1, h, clutter=True, house=False, slab=False):
+        # round 14: keep the sight line to the park / grove canopies open - low-rise in a wedge in front of
+        # each grove (the ray to a 22 m canopy top rises 145 m per grove depth)
+        for (gx0, gx1, gz0, gz1) in GROVES:
+            d_ = gz0 - z1
+            if 0.0 <= d_ < 420.0:
+                sc_ = z1 / gz0
+                if x1 > gx0 * sc_ - 10.0 and x0 < gx1 * sc_ + 10.0:
+                    cap = 18.0 + 145.0 * d_ / gz0 - 3.0
+                    if h > cap:
+                        h = cap
+                        if h < 12.0:
+                            house = True
+        if z0 < 5400:
+            # round 12: low sprawl along the elevated expressway corridor (so the deck reads)
+            xa = avenue_x(0.5 * (z0 + z1))
+            dist = max(max(x0 - (xa + AVENUE[2]), (xa - AVENUE[2]) - x1), 0.0)
+            if dist < 55.0:
+                h = min(h, 16.0 + 0.7 * dist)
+        if z0 < 14000:
+            # keep the diagonal boulevard open: clip the footprint to the wider side of the road
+            lo = min(avenue_x(z0), avenue_x(z1)) - AVENUE[2] - 2.0
+            hi = max(avenue_x(z0), avenue_x(z1)) + AVENUE[2] + 2.0
+            if x1 > lo and x0 < hi:
+                wl, wr = lo - x0, x1 - hi
+                if max(wl, wr) < 6.0:
+                    return None
+                if wl >= wr:
+                    x1 = lo
+                else:
+                    x0 = hi
         r = self.rng
         hm = self.clearance(x0, x1, z0, z1)
         if hm is None:
@@ -315,6 +372,18 @@ class City:
         if hm < 4.0:
             return None
         h = min(max(h, 5.0), hm)
+        if slab:
+            # round 12: a long low 5-8 storey residential slab: balcony bands along the whole front
+            mat, kind = K.M_APT, 'mid'
+            alb = np.array([(1.55, 1.52, 1.45), (1.35, 1.25, 1.05), (1.1, 1.12, 1.2), (1.4, 1.15, 1.0)][
+                int(self.rng4.integers(0, 4))]) * self.rng4.uniform(0.85, 1.1)
+            fp = self.facade_params(mat)
+            fp['lit0'] *= 0.5
+            fp['litadd'] *= 0.5
+            pid = self.add(x0, x1, z0, z1, h, mat, alb, rooft=int(self.rng4.integers(0, 3)), **fp)
+            if z0 < 5000 and clutter:
+                self.roof_clutter(pid, x0, x1, z0, z1, h, hm, alb)
+            return pid
         if h > 75:
             u = r.random()
             mat = K.M_CURTAIN if u < 0.25 else (K.M_GLASS if u < 0.42 else (K.M_FINS if u < 0.62 else (
@@ -336,15 +405,50 @@ class City:
         sign = 0.0
         if z0 < 3000 and h < 70 and r.random() < 0.22:
             sign = float(r.integers(1, 999))
+            # round 13: signage clusters along the expressway / railway street canyons only
+            if not self._canyon(x0, x1, z0, 50.0, 40.0):
+                sign = 0.0
         rooft = int(r.integers(0, 5))
-        near = z0 < 3600
-        heli = 2.0 if (near and 60 < h < CAM_H - 20 and x1 - x0 > 30 and z1 - z0 > 28 and r.random() < 0.5) else 0.0
+        near = z0 < 5000     # round 14: setbacks / roof kinds / clutter further out (flat identical tops)
+        # round 11: roof kinds - pitched house roofs (gable along / across the street), street-slant setbacks
+        rk, rs = 0, 0.0
+        u_r = self.rng4.random()
+        if house or (h < 13 and u_r < 0.35):
+            rk = 2 if self.rng4.random() < 0.5 else 3
+            rs = float(self.rng4.uniform(0.45, 0.75))
+            rooft = int(self.rng4.choice([0, 0, 0, 1, 2, 3, 4]))
+            half = 0.5 * ((z1 - z0) if rk == 2 else (x1 - x0))
+            rs = min(rs, max(h - 3.5, 0.5) / max(half, 1.0))
+            if house:
+                mat = K.M_APT if self.rng4.random() < 0.5 else K.M_CONC
+                alb = np.array([(1.25, 1.2, 1.12), (1.15, 1.05, 0.9), (0.95, 0.95, 1.0), (1.2, 1.1, 1.0),
+                                (0.8, 0.7, 0.62)][int(self.rng4.integers(0, 5))]) * self.rng4.uniform(0.85, 1.1)
+                fp = self.facade_params(mat)
+                fp['lit0'] *= 0.5
+                fp['litadd'] *= 0.4
+                fp['flh'] = float(self.rng4.uniform(2.8, 3.1))
+        elif near and 14 < h <= 65 and u_r < 0.36:
+            rk, rs = 1, float(self.rng4.uniform(0.9, 1.7))
+            rooft = int(self.rng4.choice([0, 3, 4, 4]))
+        heli = 2.0 if (rk == 0 and near and 60 < h < CAM_H - 20 and x1 - x0 > 30 and z1 - z0 > 28 and r.random() < 0.5) else 0.0
         # stepped setback: main body lower, upper tier inset (mostly from the front)
-        setback = near and h > 18 and r.random() < 0.38
+        setback = near and h > 18 and r.random() < 0.38 and rk == 0
+        if not setback and near and h > 16 and rk == 0 and self.rng4.random() < 0.25:
+            setback = True    # round 12: more stepped roofs
         h_main = h * r.uniform(0.6, 0.8) if setback else h
         pid = self.add(x0, x1, z0, z1, h_main, mat, alb, rooft=rooft, sign=sign,
-                       crown=heli if not setback else 0.0, pal=self.pal_code(mat=mat) if h > 60 else 0, **fp)
+                       crown=heli if not setback else 0.0, pal=self.pal_code(mat=mat) if h > 60 else 0, rk=rk, rs=rs,
+                       **fp)
         top_box = (x0, x1, z0, z1, h_main)
+        if rk >= 2:
+            # a house / low shed: no roof clutter, sometimes a TV antenna on the ridge
+            if near and self.rng4.random() < 0.3:
+                self.spires.append((0.5 * (x0 + x1) + self.rng4.uniform(-2, 2), 0.5 * (z0 + z1), h,
+                                    h + self.rng4.uniform(2.5, 4.5), 0.25))
+            return pid
+        if rk == 1:
+            dsl = min(0.45 * (z1 - z0), 0.35 * h / max(rs, 0.05))
+            top_box = (x0, x1, z0 + dsl + 0.5, z1, h)
         if setback:
             w, d = x1 - x0, z1 - z0
             ix0 = x0 + w * (r.uniform(0.0, 0.25) if r.random() < 0.6 else 0.0)
@@ -356,14 +460,14 @@ class City:
                 if near and clutter:
                     # clutter on the lower terrace too
                     self.roof_clutter(pid, x0, x1, z0, iz0, h_main, hm, alb)
-        if near and clutter and h < CAM_H - 4 and r.random() < 0.88:
+        if near and clutter and h < CAM_H - 4 and r.random() < 0.88 and top_box[3] - top_box[2] > 7:
             self.roof_clutter(pid, top_box[0], top_box[1], top_box[2], top_box[3], top_box[4], hm, alb)
         if h > 95 and z0 < 2200:
             self.lights.append((0.5 * (x0 + x1), h + 0.8, z0, float(r.uniform(0, 1))))
         return pid
 
     def tower(self, sxf, z, w, d, h, tiers=(), mat=K.M_GLASS, alb=None, fp=None, lights=True, crown=None,
-              masts=0, crown_lit=False, fam=None):
+              masts=0, crown_lit=False, fam=None, cloud=None, gondola=False):
         """Hero tower at screen x fraction sxf; tiers: list of (height_add, width_frac[, x_offset_frac[,
         depth_frac]]). crown: None | 'mech' | 'chamfer'."""
         r = self.rng
@@ -371,8 +475,22 @@ class City:
         alb = self.albedo('tower') if alb is None else np.array(alb)
         fp = dict(self.facade_params(mat)) if fp is None else fp
         x0, x1 = xc - w / 2, xc + w / 2
+        rsf = 0.0 if cloud is None else 1.0 + float(cloud)
+        if cloud is None and mat in (K.M_GLASS, K.M_CURTAIN, K.M_DARK):
+            # round 14: every glass tower mirrors the sky (lilac high -> peach low) with its own variant
+            rsf = 1.0 + float(int(sxf * 97.0 + z) % 4)
+        if sxf in GLINT:
+            rsf += 8.0 + 4.0 * round(GLINT[sxf] * 20.0)     # glint flag + peak height (in 1/20 of the face)
         pid = self.add(x0, x1, z, z + d, h, mat, alb, crown=1.0 if (crown_lit and not tiers) else 0.0,
-                       pal=self.pal_code(fam, mat), **fp)
+                       pal=self.pal_code(fam, mat), rs=rsf, **fp)
+        if gondola:
+            # window-cleaning gondola hanging on the camera-facing face + its two cables
+            gx = xc + r.uniform(-0.3, 0.2) * w
+            gy = h * r.uniform(0.55, 0.8)
+            self.add(gx, gx + 4.0, z - 1.3, z - 0.1, gy + 1.5, K.M_PLAIN, np.array([1.3, 1.25, 1.2]), base=gy,
+                     parent=pid)
+            for cxg in (gx + 0.5, gx + 3.5):
+                self.spires.append((cxg, z - 0.7, gy + 1.5, h, 0.1))
         top = h
         cw, cd, cx_ = w, d, xc
         for k, tr in enumerate(tiers):
@@ -383,7 +501,7 @@ class City:
             ncx = xc + off * w
             last = k == len(tiers) - 1
             self.add(ncx - nw / 2, ncx + nw / 2, z + (d - nd) / 2, z + (d + nd) / 2, top + dh, mat, alb * 0.97,
-                     base=top, parent=pid, crown=1.0 if (crown_lit and last) else 0.0, **fp)
+                     base=top, parent=pid, crown=1.0 if (crown_lit and last) else 0.0, rs=rsf, **fp)
             top += dh
             cw, cd, cx_ = nw, nd, ncx
         zc = z + (d - cd) / 2
@@ -397,16 +515,39 @@ class City:
             top += 9.0
             cw, cd = nw, nd
             zc = z + (d - cd) / 2
+        elif crown == 'lattice':
+            # open lattice crown screening a machine room, with a lit ring under it
+            nw, nd = cw * 0.55, cd * 0.55
+            self.add(cx_ - nw / 2, cx_ + nw / 2, z + (d - nd) / 2, z + (d + nd) / 2, top + 8.0, K.M_PLAIN,
+                     alb * 0.6, base=top, parent=pid)
+            self.add(cx_ - cw / 2 + 0.3, cx_ + cw / 2 - 0.3, zc + 0.3, zc + cd - 0.3, top + 14.0, K.M_FENCE,
+                     np.array([0.9, 0.9, 1.0]), base=top, parent=pid)
+            top += 14.0
+            cw, cd = cw - 0.6, cd - 0.6
+            zc = z + (d - cd) / 2
+        elif crown == 'heli':
+            # helipad: a thin slab overhanging the parapet on a short plinth, lamps at its corners
+            self.add(cx_ - cw / 2 + 2.0, cx_ + cw / 2 - 2.0, zc + 2.0, zc + cd - 2.0, top + 3.0, K.M_PLAIN,
+                     alb * 0.7, base=top, parent=pid)
+            self.add(cx_ - cw / 2 - 1.8, cx_ + cw / 2 + 1.8, zc - 1.8, zc + cd + 1.8, top + 4.6, K.M_PLAIN,
+                     np.array([1.2, 1.18, 1.15]), base=top + 3.0, parent=pid)
+            for sx_ in (-1.0, 1.0):
+                self.lights.append((cx_ + sx_ * (cw / 2 + 1.2), top + 4.9, zc - 1.2, r.uniform(0, 1)))
+            top += 4.6
+            self.add(cx_ - 1.2, cx_ + 1.2, zc + cd * 0.4, zc + cd * 0.4 + 2.4, top + 3.0, K.M_FENCE,
+                     np.array([0.8, 0.8, 0.9]), base=top, parent=pid)
         elif crown == 'chamfer':
             # chamfered top: several short, successively narrower tiers
             for k in range(5):
                 nw, nd = cw * (0.93 - 0.02 * k), cd * (0.93 - 0.02 * k)
                 self.add(cx_ - nw / 2, cx_ + nw / 2, z + (d - nd) / 2, z + (d + nd) / 2, top + 2.2, mat,
-                         alb * 0.95, base=top, parent=pid, **fp)
+                         alb * 0.95, base=top, parent=pid, rs=rsf, **fp)
                 top += 2.2
                 cw, cd = nw, nd
             zc = z + (d - cd) / 2
-        if len(tiers) < 6 and cw > 12:
+        if crown == 'heli':
+            pass
+        elif len(tiers) < 6 and cw > 12:
             top, cw, cd, cx_ = self.tower_top(pid, mat, alb, fp, cx_, zc, cw, cd, top, crown, lights)
             zc = z + (d - cd) / 2
         for k in range(masts):
@@ -487,7 +628,66 @@ class City:
             self.spires.append((ax, z0c + cd * r.uniform(0.3, 0.7), top, top + ah, r.uniform(0.5, 1.4)))
             if lights and ah > 12:
                 self.lights.append((ax, top + ah, z0c + cd * 0.5, float(r.uniform(0, 1))))
+        self.crown_dressing(pid, cx_, z0c, cw, cd, top, alb, lights)
         return top, cw, cd, cx_
+
+    def crown_dressing(self, pid, cx_, z0c, cw, cd, top, alb, lights):
+        """Round 12: a cluttered, cauliflower tower-crown silhouette (own RNG): a bank of boxy cooling towers
+        with fan stacks behind a louvre screen, an antenna cluster of mixed whips / lattice masts / a dish
+        mast, a window-cleaning crane stub with a raised jib, and a parked gondola overhanging the parapet."""
+        r = np.random.default_rng(int(abs(cx_ * 7.0 + z0c * 3.0 + top)) % (2 ** 31))
+        sd = lambda: int(r.integers(1, 10 ** 6))
+        pale = np.array([1.15, 1.12, 1.1]) * r.uniform(0.75, 1.0)
+        dark = np.array([0.7, 0.72, 0.82]) * r.uniform(0.7, 1.0)
+        z1c = z0c + cd
+        # cooling-tower bank on one side
+        if r.random() < 0.8 and cw > 16:
+            n = int(r.integers(2, 5))
+            uw = min(r.uniform(5.0, 7.5), cw * 0.8 / n)
+            side = float(r.choice([-1.0, 1.0]))
+            x = cx_ + side * cw * 0.45 - (uw * n if side > 0 else 0.0)
+            zz = z0c + cd * r.uniform(0.15, 0.35)
+            uh = r.uniform(4.0, 6.5)
+            self.add(x - 0.4, x + uw * n + 0.4, zz - 0.4, zz + uw + 0.4, top + uh * 0.85, K.M_FENCE, dark, base=top,
+                     parent=pid, seed=sd())
+            for k in range(n):
+                xk = x + k * uw
+                self.add(xk + 0.3, xk + uw - 0.3, zz, zz + uw, top + uh, K.M_TANK, pale * r.uniform(0.85, 1.0),
+                         base=top, parent=pid, seed=sd())
+                fw = uw * 0.55
+                self.add(xk + (uw - fw) / 2, xk + (uw + fw) / 2, zz + (uw - fw) / 2, zz + (uw + fw) / 2,
+                         top + uh + r.uniform(1.0, 1.8), K.M_PLAIN, dark * 1.1, base=top + uh, parent=pid, seed=sd())
+        # antenna cluster: 3-6 masts of mixed height / weight, one lattice mast with a dish platform
+        if r.random() < 0.75:
+            ax0 = cx_ + r.uniform(-0.3, 0.3) * cw
+            for k in range(int(r.integers(3, 7))):
+                ah = r.uniform(5.0, 26.0) if k else r.uniform(18.0, 34.0)
+                self.spires.append((ax0 + r.uniform(-4.0, 4.0), z0c + cd * r.uniform(0.4, 0.7), top, top + ah,
+                                    2.2 if k == 0 else r.uniform(0.35, 1.0)))
+                if lights and k == 0:
+                    self.lights.append((ax0, top + ah, z0c + cd * 0.5, float(r.uniform(0, 1))))
+            if r.random() < 0.5:
+                self.add(ax0 - 2.2, ax0 + 2.2, z0c + cd * 0.5, z0c + cd * 0.5 + 1.5, top + r.uniform(10.0, 14.0),
+                         K.M_PLAIN, dark, base=top + 8.0, parent=pid, seed=sd())
+        # crane stub: short mast + raised jib (the boom drawn as a thin lattice box)
+        if r.random() < 0.55:
+            sgn = float(r.choice([-1.0, 1.0]))
+            mxc = cx_ - sgn * r.uniform(0.15, 0.35) * cw
+            mz = z0c + cd * r.uniform(0.3, 0.6)
+            mh = r.uniform(9.0, 15.0)
+            self.add(mxc - 0.8, mxc + 0.8, mz, mz + 1.6, top + mh, K.M_PLAIN, dark * 0.9, base=top, parent=pid, seed=sd())
+            self.add(mxc - 2.0, mxc + 2.0, mz - 0.5, mz + 2.1, top + mh * 0.45, K.M_PLAIN, pale * 0.8, base=top,
+                     parent=pid, seed=sd())
+            bl = r.uniform(10.0, 16.0)
+            for k in range(4):
+                bx = mxc + sgn * (bl * k / 4.0)
+                self.add(min(bx, bx + sgn * bl / 4.0), max(bx, bx + sgn * bl / 4.0), mz + 0.2, mz + 1.2,
+                         top + mh + 0.8 + 1.4 * k, K.M_FENCE, dark, base=top + mh - 0.6 + 1.4 * k, parent=pid, seed=sd())
+        # parked window-cleaning gondola overhanging the front parapet
+        if r.random() < 0.5 and cw > 14:
+            gx = cx_ + r.uniform(-0.35, 0.2) * cw
+            self.add(gx, gx + 5.0, z0c - 1.2, z0c + 0.4, top + 2.2, K.M_PLAIN, pale, base=top + 0.3, parent=pid,
+                     seed=sd())
 
     # ------------------------------------------------------------------ layout
     def _generate(self):
@@ -511,6 +711,7 @@ class City:
                 if r.random() < 0.4:
                     c = bx0 + (bx1 - bx0) * r.uniform(0.35, 0.65)
                     cuts = [bx0, c - 2.5, c + 2.5, bx1]
+                resid = za0 < 5000 and self.rng4.random() < (0.22 if za0 < 3400 else 0.3)
                 for a0, a1 in zip(cuts[::2], cuts[1::2]):
                     # front row and back row of buildings in the block
                     dfront = dz * r.uniform(0.45, 0.65)
@@ -518,19 +719,36 @@ class City:
                         if rz1 - rz0 < 8:
                             continue
                         x = a0 + r.uniform(0, 1.0)
-                        while x < a1 - 6:
+                        while resid and x < a1 - 6:
+                            # a patch of 2-3 storey houses with pitched roofs between the mid-rises
+                            w = min(self.rng4.uniform(7.0, 12.5), a1 - x)
+                            dd = (rz1 - rz0) * self.rng4.uniform(0.55, 0.9)
+                            zz = rz0 + self.rng4.uniform(0, (rz1 - rz0) - dd)
+                            if self.rng4.random() < 0.12:
+                                self.building(x, x + w, zz, zz + dd, float(self.rng4.uniform(14, 26)))
+                            else:
+                                self.building(x, x + w, zz, zz + dd, float(self.rng4.uniform(7.5, 11.0)), house=True)
+                            x += w + self.rng4.uniform(0.8, 2.5)
+                        while (not resid) and x < a1 - 6:
+                            if 1500 < za0 < 4400 and a1 - x > 36 and self.rng4.random() < 0.13:
+                                ws = min(self.rng4.uniform(38.0, 80.0), a1 - x)
+                                ds = min(self.rng4.uniform(10.0, 15.0), rz1 - rz0)
+                                zs = rz0 if self.rng4.random() < 0.5 else rz1 - ds
+                                self.building(x, x + ws, zs, zs + ds, float(self.rng4.uniform(14.0, 25.0)), slab=True)
+                                x += ws + self.rng4.uniform(1.0, 3.0)
+                                continue
                             w = min((r.uniform(9, 34) if r.random() < 0.55 else r.uniform(24, 48)) * (1 + max(za0 - 3500, 0) / 5000), a1 - x)
                             if a1 - (x + w) < 7:
                                 w = a1 - x
                             cl = 0.5 + 0.5 * math.sin(x / 700 + 1.3) * math.sin(za0 / 900 + 0.4) + \
                                 0.3 * math.sin(x / 260 - za0 / 330)
-                            h = math.exp(r.normal(math.log(22), 0.5)) * (1 + 1.2 * max(cl, 0) ** 2)
+                            h = math.exp(r.normal(math.log(21), 0.68)) * (1 + 1.2 * max(cl, 0) ** 2)
                             if za0 > 2300 and r.random() < 0.012 + 0.03 * max(cl, 0):
                                 h = r.uniform(80, 150)
                             h = float(np.clip(h, 7, 65 if za0 < 2300 else 150))
-                            dd = (rz1 - rz0) * r.uniform(0.85, 1.0)
+                            dd = (rz1 - rz0) * (r.uniform(0.85, 1.0) if r.random() < 0.55 else r.uniform(0.5, 0.85))
                             zz = rz0 + r.uniform(0, (rz1 - rz0) - dd)
-                            if r.random() < 0.3 and w > 16 and dd > 16 and za0 < 3600:
+                            if r.random() < 0.3 and w > 16 and dd > 16 and za0 < 5000:
                                 # L-shape in plan: a full-depth wing + a lower (or taller) shallow wing
                                 c = x + w * r.uniform(0.35, 0.65)
                                 left_full = r.random() < 0.5
@@ -568,18 +786,30 @@ class City:
         # ---------------- hero towers
         # Docomo-like clock tower: slender body, stepped crown with clock faces, twin needle spires
         zd = 2150.0
+        # round 14: the stepped Docomo-like tower read as New York (Empire State crown). It is replaced by a
+        # Tokyo Tower lattice (drawn by Scene._draw_tokyo_tower). The old tower is still generated and then
+        # dropped, so every later RNG draw (and the whole tuned layout) stays identical.
+        _n0 = (len(self.rows), len(self.spires), len(self.lights))
         fpd = dict(flh=4.4, bay=2.2, wwf=0.55, whf=0.86, lit0=0.15, litadd=0.4, litcol=0.2, grp=40, runf=2)
         xc, top, pid = self.tower(0.30, zd, 40.0, 40.0, 190.0, tiers=[(16, 0.9), (14, 0.8), (12, 0.66), (10, 0.52),
                                                                        (8, 0.4)],
                                   mat=K.M_FINS, alb=(1.02, 0.98, 1.1), fp=fpd, lights=False, fam=6)
-        self.clocks.append((xc, 190.0 + 16 + 14 * 0.5, zd + (40 - 40 * 0.8) / 2, 7.5))
-        for dxs in (-6.0, 6.0):
-            self.spires.append((xc + dxs, zd + 20.0, top, top + 58.0, 2.2))
-            self.lights.append((xc + dxs, top + 58.0, zd + 20, 0.2))
-        self.spires.append((xc, zd + 20.0, top, top + 20.0, 3.0))
+        # round 12: no clock face / twin needles (read as invented): the stepped crown carries one tall
+        # needle and two short service masts
+        self.spires.append((xc, zd + 20.0, top, top + 62.0, 3.2))
+        self.lights.append((xc, top + 62.0, zd + 20, 0.2))
+        for dxs in (-7.0, 7.0):
+            self.spires.append((xc + dxs, zd + 20.0, top, top + 9.0, 0.9))
         self.docomo = (xc, zd, top)
         for dxs in (-12.0, 12.0):
             self.lights.append((xc + dxs, 190.0 + 0.8, zd + 4.0, 0.7))
+        del self.rows[_n0[0]:], self.spires[_n0[1]:], self.lights[_n0[2]:]
+        zt_ = TT_Z
+        xtt = (TT_SX - 0.5) * W * zt_ / f
+        self.tokyo = (xtt, zt_)
+        self.lights.append((xtt, TT_H + 0.5, zt_, 0.15))
+        self.lights.append((xtt - 7.0, 252.0, zt_, 0.65))
+        self.lights.append((xtt + 7.0, 252.0, zt_, 0.65))
         # Shinjuku-like cluster on the right
         # front row
         # Tocho-like: wide base block + two towers with chamfered crowns, stone fins
@@ -592,6 +822,22 @@ class City:
         fpb = dict(flh=4.2, bay=3.2, wwf=0.9, whf=0.7, lit0=0.1, litadd=0.35, litcol=0.3, grp=6, runf=1, glass=0.5)
         pidt = self.add(xt - 48, xt + 48, zt, zt + 40, 170.0, K.M_CURTAIN, np.array(albt), pal=self.pal_code(3), **fpb)
         for sx0 in (xt - 48, xt + 48 - 36):
+            if sx0 > xt:
+                # round 14: the twins were clones. The right one is now a taller white precast tower with
+                # horizontal ribbon windows, a flat top and a louvred machine screen (Tocho's partner in the
+                # skyline, not its copy)
+                fpr = dict(flh=3.7, bay=1.9, wwf=0.96, whf=0.46, lit0=0.1, litadd=0.35, litcol=0.3, grp=8, runf=1)
+                self.add(sx0 + 2, sx0 + 34, zt + 3, zt + 37, 258.0, K.M_BAND, np.array((1.3, 1.28, 1.25)),
+                         base=170.0, parent=pidt, pal=self.pal_code(10), **fpr)
+                self.add(sx0 + 7, sx0 + 29, zt + 8, zt + 32, 266.0, K.M_PLAIN, np.array((0.9, 0.9, 0.98)),
+                         base=258.0, parent=pidt)
+                self.add(sx0 + 4, sx0 + 32, zt + 5, zt + 35, 264.0, K.M_FENCE, np.array((0.8, 0.8, 0.9)),
+                         base=258.0, parent=pidt)
+                self.lights.append((sx0 + 5, 266.6, zt + 5, 0.1))
+                self.lights.append((sx0 + 31, 266.6, zt + 5, 0.1))
+                for _ in range(4):      # keep the RNG stream of the old chamfered twin
+                    pass
+                continue
             self.add(sx0, sx0 + 36, zt + 1, zt + 39, 225.0, K.M_FINS, np.array(albt) * 0.98, base=170.0,
                      parent=pidt, **fpt)
             ctop = 225.0
@@ -607,16 +853,14 @@ class City:
             self.lights.append((sx0 + 18 + cw_ / 2 - 1, ctop + 0.6, zt + 5, 0.4))
             self.spires.append((sx0 + 18, zt + 20, ctop, ctop + 12, 0.9))
         specs = [  # sxf, z, w, d, h, tiers, kind, crown, masts, mat
-            (0.575, 2350, 38, 36, 232, [(12, 0.8)], None, 'chamfer', 1, K.M_CURTAIN),
-            (0.645, 2300, 42, 40, 200, [], 'cocoon', None, 0, K.M_GLASS),
-            (0.79, 2250, 50, 44, 250, [(10, 0.9), (10, 0.78), (8, 0.62)], None, None, 0, K.M_DARK),  # Sompo-like
-            (0.87, 2400, 40, 36, 236, [(14, 0.7, -0.15), (12, 0.45, -0.27)], None, None, 0, K.M_CURTAIN),
-            (0.95, 2300, 34, 30, 205, [], None, 'mech', 0, K.M_FINS),
+            (0.575, 2350, 38, 36, 232, [(12, 0.8)], None, 'lattice', 1, K.M_CURTAIN),
+            (0.79, 2250, 50, 62, 250, [(16, 0.72, 0.14)], None, 'mech', 0, K.M_FINS),  # r14: warm brick, off-centre setback
+            (0.87, 2400, 40, 64, 236, [(14, 0.85, -0.07)], None, 'heli', 0, K.M_CURTAIN),
+            (0.95, 2300, 34, 56, 205, [], None, 'mech', 0, K.M_FINS),
             # back row (taller, hazier)
-            (0.61, 3400, 46, 40, 280, [], 'park', None, 0, K.M_GLASS),     # Park-tower-like 3 pyramids
             (0.755, 3500, 60, 50, 320, [], None, 'mech', 2, K.M_DARK),
-            (0.84, 3900, 52, 50, 300, [(18, 0.62)], None, 'chamfer', 1, K.M_BAND),
-            (0.965, 3300, 42, 40, 268, [], None, 'mech', 1, K.M_CURTAIN),
+            (0.84, 6000, 60, 55, 360, [(18, 0.62)], None, 'chamfer', 1, K.M_BAND),   # r12: pushed into haze
+            (0.965, 5200, 52, 64, 330, [], None, 'mech', 1, K.M_CURTAIN),  # r12: pushed back
             (0.53, 4300, 40, 40, 290, [(12, 0.75)], None, None, 0, K.M_FINS),
         ]
         for sxf, z, w, d, h, tiers, kind, crown, masts, mat in specs:
@@ -629,7 +873,7 @@ class City:
                     prof.append((70.0 / n, wf))
                 fpc = dict(self.facade_params(K.M_GLASS))
                 fpc.update(bay=1.8, flh=4.0)
-                self.tower(sxf, float(z), w, d, h, tiers=prof, mat=K.M_GLASS, fp=fpc, alb=(0.7, 0.8, 1.0), fam=1)
+                self.tower(sxf, float(z), w, d, h, tiers=prof, mat=K.M_GLASS, fp=fpc, alb=(0.9, 0.95, 1.05), fam=8)
             elif kind == 'park':
                 # three blocks of different heights, each with a pyramid top
                 xc0 = (sxf - 0.5) * self.W * z / self.f
@@ -637,32 +881,61 @@ class City:
                 for k, (dx_, hh) in enumerate(((-24, h - 30), (0, h), (24, h - 15))):
                     bx = xc0 + dx_
                     pidp = self.add(bx - 13, bx + 13, z + k * 2, z + 38, hh, K.M_GLASS, np.array((0.8, 0.85, 1.0)),
-                                    pal=self.pal_code(6),
+                                    pal=self.pal_code(4),
                                     **fpp)
                     top = hh
                     for s_ in range(12):
                         wf = 1 - (s_ + 1) / 13
                         self.add(bx - 13 * wf, bx + 13 * wf, z + k * 2 + (36 - k * 2) * (1 - wf) / 2,
                                  z + 38 - (36 - k * 2) * (1 - wf) / 2, top + 2.4, K.M_PLAIN,
-                                 np.array((0.8, 0.85, 1.0)), base=top, parent=pidp)
+                                 np.array((0.42, 0.44, 0.55)), base=top, parent=pidp)
                         top += 2.4
                     self.lights.append((bx, top + 0.5, z + 20, r.uniform(0, 1)))
             else:
                 self.tower(sxf, float(z), w, d, h, tiers=tiers, mat=mat, crown=crown, masts=masts,
-                           crown_lit=(crown is None and r.random() < 0.6), fam=HERO_FAM.get(sxf))
+                           crown_lit=(crown is None and r.random() < 0.6), fam=HERO_FAM.get(sxf),
+                           cloud=HERO_CLOUD.get(sxf), gondola=sxf in (0.79, 0.87, 0.95, 0.575))
+        self._expressway()
         # distant high-rises melting into the haze (a second, paler skyline)
         for k in range(14):
             z = float(r.uniform(3800, 11000))
             sxf = float(r.uniform(0.52, 1.08)) if k < 11 else float(r.uniform(-0.08, 0.12))
             if 0.5 < sxf < 1.0 and z < 5000:
                 continue
+            if k < 11 and k % 3 == 1:
+                continue     # round 12: thinner, hazier second skyline
             h = float(r.uniform(150, 265))
             w = float(r.uniform(30, 70))
             self.tower(sxf, z, w, w * r.uniform(0.7, 1.0), h, tiers=[] if r.random() < 0.6 else [(10, 0.7)],
                        mat=[K.M_GLASS, K.M_FINS, K.M_CURTAIN, K.M_DARK][int(r.integers(0, 4))], lights=z < 7000)
-        for sxf, z, w, h in [(0.035, 2900, 44, 196), (0.115, 4200, 40, 190), (0.19, 3300, 34, 150)]:
-            self.tower(sxf, float(z), w, w * 0.9, h, tiers=[] if r.random() < 0.5 else [(12, 0.75)],
-                       mat=[K.M_CURTAIN, K.M_FINS, K.M_DARK][int(r.integers(0, 3))], crown='chamfer')
+        # round 14: no chamfered (Art-Deco / New York) crowns on the left: flat machine tops, a helipad
+        for (sxf, z, w, h), cr_ in zip([(0.035, 2900, 44, 196), (0.115, 4200, 40, 190), (0.19, 3300, 34, 150)],
+                                       ('heli', 'mech', None)):
+            self.tower(sxf, float(z), w, w * 0.9, h, tiers=[] if r.random() < 0.5 else [(12, 0.75, 0.12)],
+                       mat=[K.M_CURTAIN, K.M_FINS, K.M_DARK][int(r.integers(0, 3))], crown=cr_)
+
+    def _expressway(self):
+        """Round 12: an elevated Shuto-style expressway over the diagonal avenue, receding toward the
+        afterglow: short deck segments (the diagonal is stepped finer than a pixel), box girder with a sound
+        barrier, T-piers, lamp posts and traffic lights on the deck (see K.M_ROAD)."""
+        top, thick, hw = 24.0, 3.2, 11.5
+        z = 1060.0
+        k = 0
+        while z < 5600.0:
+            dz = max(2.0, z / 700.0)
+            xa = avenue_x(z + 0.5 * dz)
+            if self.clearance(xa - hw, xa + hw, z, z + dz) is not None or True:
+                self.add(xa - hw, xa + hw, z, z + dz + 0.05, top, K.M_ROAD, np.array([0.9, 0.9, 1.0]),
+                         base=top - thick, seed=1000 + k)
+            z += dz
+            k += 1
+        z = 1090.0
+        while z < 5600.0:
+            xa = avenue_x(z)
+            self.add(xa - 2.0, xa + 2.0, z, z + 3.0, top - thick, K.M_PLAIN, np.array([0.8, 0.8, 0.9]), seed=2000 + int(z))
+            self.add(xa - 7.0, xa + 7.0, z - 0.5, z + 3.5, top - thick, K.M_PLAIN, np.array([0.85, 0.85, 0.95]),
+                     base=top - thick - 1.8, seed=3000 + int(z))
+            z += 42.0
 
     def _name_boards(self):
         """Rooftop company-name boards (real Japanese lettering, see s03_city_dusk_text.NAMES) along the
@@ -671,10 +944,13 @@ class City:
         order = np.random.default_rng(5).permutation(nn)
         cnt = 0
         for (pid, x0, x1, z0, z1, h, hm) in self.name_cands:
-            if z0 > 2700 or h > 70:
+            if z0 > 3300 or h > 70:
                 continue
             q = np.random.default_rng(int(abs(x0 * 131.0 + z0 * 17.0 + h * 7.0)) % (2 ** 31))
-            if q.random() > NAME_P:
+            # round 13: ~70 % fewer boards, clustered along the expressway and the railway (they read as
+            # signage along the street canyons, not as confetti over the whole city)
+            pn = 0.6 if self._canyon(x0, x1, z0, 65.0, 45.0) else 0.03
+            if q.random() > pn:
                 continue
             w = x1 - x0
             bw = min(w * q.uniform(0.55, 0.85), 26.0)
@@ -691,6 +967,78 @@ class City:
             cnt += 1
             self.add(bx, bx + bw, bz, bz + 0.35, h + 0.9 + bh, K.M_NAME, np.ones(3), base=h + 0.9,
                      parent=pid, seed=sd, lit0=1.0 if q.random() < 0.75 else 0.0)
+
+    def _open_lots(self):
+        """round 13: break the regular block stacking - clear irregular lots (parking, demolition sites,
+        pocket parks, wider side streets) out of some mid-city blocks, so the grid gets irregular gaps and the
+        blocks behind show through. Removes whole low buildings with their roof clutter / antennas."""
+        PX, SWX, _, PZ, SWZ, OZ = STREET
+        rects = []
+        zb = OZ + math.floor((1000 - OZ) / PZ) * PZ
+        q = np.random.default_rng(777)
+        while zb < 5600:
+            OX = row_ox(zb)
+            for j in range(-60, 60):
+                u = q.random()
+                if u < (0.16 if zb < 3800 else 0.2):
+                    bx0 = OX + j * PX + SWX
+                    bx1 = OX + (j + 1) * PX
+                    a = q.uniform(0.0, 0.6)
+                    b = min(a + q.uniform(0.25, 0.6), 1.0)
+                    za_ = zb + SWZ + (0.0 if q.random() < 0.6 else q.uniform(0.2, 0.5) * (PZ - SWZ))
+                    rects.append((bx0 + a * (bx1 - bx0), bx0 + b * (bx1 - bx0), za_, zb + PZ))
+                else:
+                    q.random(); q.random(); q.random(); q.random()
+            zb += PZ
+        # round 14: parks and a shrine grove (yn_07: clumps of dark green canopy in the middle ground)
+        rects = rects + [g[:4] for g in GROVES]
+        R = np.array(rects, np.float64)
+        qt = np.random.default_rng(4242)
+        for k, (ax0, ax1, az0, az1) in enumerate(rects):
+            grove = k >= len(rects) - len(GROVES)
+            if not grove and qt.random() > 0.45:
+                continue
+            dens = 1.0 if grove else float(qt.uniform(0.35, 0.8))
+            sp = 6.5 if grove else 8.0
+            zz = az0 + 2.0
+            while zz < az1 - 2.0:
+                xx = ax0 + qt.uniform(0.0, sp)
+                while xx < ax1 - 2.0:
+                    if qt.random() < dens:
+                        r_ = float(qt.uniform(3.5, 6.0) * (1.6 if grove else 1.0))
+                        ht = float(qt.uniform(10.0, 17.0) * (1.6 if grove else 1.0))
+                        self.trees.append((xx + qt.uniform(-2, 2), zz + qt.uniform(-2, 2), ht, r_,
+                                           int(qt.integers(1, 10 ** 6))))
+                    xx += sp * qt.uniform(0.75, 1.25)
+                zz += sp * qt.uniform(0.7, 1.1)
+
+        def gone(x, z, h):
+            if len(R) == 0:
+                return False
+            inside = (x >= R[:, 0]) & (x <= R[:, 1]) & (z >= R[:, 2]) & (z <= R[:, 3])
+            if h > 48.0:
+                return bool(np.any(inside[len(R) - len(GROVES):]) and h < 70.0)
+            if len(R) == 0:
+                return False
+            return bool(np.any((x >= R[:, 0]) & (x <= R[:, 1]) & (z >= R[:, 2]) & (z <= R[:, 3])))
+        keep = []
+        for sk, rec in self.rows:
+            cx_ = 0.5 * (rec[K.BX0] + rec[K.BX1])
+            cz_ = 0.5 * (rec[K.BZ0] + rec[K.BZ1])
+            if rec[K.MAT] != K.M_ROAD and cz_ < 5700 and gone(cx_, cz_, rec[K.BH]):
+                continue
+            keep.append((sk, rec))
+        self.rows = keep
+        self.spires = [s_ for s_ in self.spires if not (s_[1] < 5700 and s_[2] < 48 and gone(s_[0], s_[1], s_[2]))]
+        self.lights = [l_ for l_ in self.lights if not (l_[2] < 5700 and l_[1] < 50 and gone(l_[0], l_[2], l_[1] - 1))]
+        self.name_cands = [c_ for c_ in self.name_cands if not gone(0.5 * (c_[1] + c_[2]), 0.5 * (c_[3] + c_[4]), c_[5])]
+
+    def _canyon(self, x0, x1, z0, da, dr):
+        """round 13: is the block within da m of the expressway avenue or dr m of the railway?"""
+        xa = avenue_x(z0)
+        d_av = max(max(x0 - (xa + AVENUE[2]), (xa - AVENUE[2]) - x1), 0.0)
+        d_tr = abs(z0 - self.track_z(0.5 * (x0 + x1)))
+        return d_av < da or d_tr < dr
 
     def arrays(self):
         self.rows.sort(key=lambda it: (-it[0][0], it[0][1]))
@@ -713,7 +1061,7 @@ class Scene:
         self.sun_p = (SUN_X * W + self.mx_sky, self.hy + 0.035 * H)
         self.sky = S.sky_gradient(pw, ph, _sky_preset(), horizon=HZ, sun=self.sun_p, sun_radius=0.32)
         self.sky = self.sky + S.sun(pw, ph, self.sun_p[0], self.sun_p[1], radius=0.02, color=(1.0, 0.62, 0.3),
-                                    disc=False, intensity=0.55, glow_size=1.3)
+                                    disc=False, intensity=0.45, glow_size=0.8)
         self._build_clouds()
         # haze colour image in frame coords (for the city's aerial perspective): the sky above the horizon;
         # below it graded from the horizon colour toward warm peach near the sun / blue-violet at the edges
@@ -722,10 +1070,11 @@ class Scene:
         hyi = int(self.hy) - 2
         haze[hyi:] = haze[hyi]
         xs = np.arange(W, dtype=np.float32)
-        near_sun = np.exp(-np.abs(xs - SUN_X * W) / (0.22 * W))[:, None]
-        tint = (np.array([0.25, 0.32, 0.56], np.float32) * (1 - near_sun) +
-                np.array([0.98, 0.56, 0.48], np.float32) * near_sun)
-        ky = C.smoothstep(self.hy, self.hy + 0.3 * H, np.arange(H, dtype=np.float32))[:, None, None] * 0.75
+        # round 11: warm peach-gold haze only in a cone around the sun, cool slate / teal in the side thirds
+        near_sun = np.exp(-((xs - SUN_X * W) / (0.15 * W)) ** 2)[:, None]
+        tint = (np.array([0.17, 0.23, 0.36], np.float32) * (1 - near_sun) +
+                np.array([1.0, 0.64, 0.4], np.float32) * near_sun)
+        ky = C.smoothstep(self.hy, self.hy + 0.25 * H, np.arange(H, dtype=np.float32))[:, None, None] * 0.85
         haze = haze * (1 - ky) + tint[None] * ky
         haze = cv2.GaussianBlur(haze, (0, 0), 0.01 * W)
         self.haze = np.ascontiguousarray(haze.astype(np.float64))
@@ -739,7 +1088,8 @@ class Scene:
         self.glare_pad = int(YAW * W + 4)
         gp = self.glare_pad
         self.glare = np.ascontiguousarray(self._glare(W + 2 * gp, H, SUN_X * W + gp, self.hy + 0.004 * H))
-        self.paper = PAPER.paper(W, H)     # static paint / paper surface (identical every frame)
+        self.lens = np.ascontiguousarray(self._lens(W + 2 * gp, H, SUN_X * W + gp, self.hy + 0.004 * H))
+        self.paper = PAPER.paper(W, H, amt=0.02)     # static paint / paper surface (identical every frame)
 
     # ------------------------------------------------------------------ clouds
     def _build_clouds(self):
@@ -755,9 +1105,10 @@ class Scene:
         # shift the plate so the cloud sits at the same frame position as designed (plate is wider)
         f = lambda x: x * W + ox
         high = [
-            dict(cx=f(0.26), cy=0.08 * H, L=0.8 * W, T=0.034 * H, tier=1.0, tilt=0.03, sub=3),
-            dict(cx=f(0.5), cy=0.035 * H, L=0.28 * W, T=0.016 * H, tier=0.95, tilt=-0.02, sub=2),
-            dict(cx=f(0.14), cy=0.24 * H, L=0.46 * W, T=0.028 * H, tier=0.85, sub=2, wave=2.2),
+            # round 13: thin feathered cirrus (were thick stroked paths)
+            dict(cx=f(0.26), cy=0.08 * H, L=0.8 * W, T=0.017 * H, tier=1.0, tilt=0.03, sub=5),
+            dict(cx=f(0.5), cy=0.035 * H, L=0.28 * W, T=0.009 * H, tier=0.95, tilt=-0.02, sub=3),
+            dict(cx=f(0.14), cy=0.24 * H, L=0.46 * W, T=0.014 * H, tier=0.85, sub=4, wave=2.2),
         ]
         low = [
             dict(cx=f(0.38), cy=0.34 * H, L=0.44 * W, T=0.016 * H, tier=0.55, sub=2),
@@ -765,8 +1116,8 @@ class Scene:
             dict(cx=f(0.10), cy=0.395 * H, L=0.32 * W, T=0.016 * H, tier=0.2, sub=2, wave=2.0),
             dict(cx=f(0.22), cy=0.495 * H, L=0.42 * W, T=0.011 * H, tier=0.0, sub=1, wave=1.5),
         ]
-        hp = SK.paint(pw, ph, skyc, high, sun, seed=11)
-        lp = SK.paint(pw, ph, skyc, low, sun, seed=23)
+        hp = SK.cirrus(pw, ph, skyc, high, sun, seed=11, lit=1.0)
+        lp = SK.cirrus(pw, ph, skyc, low, sun, seed=23, lit=0.35)
         self.clouds = S.CloudDrift([(self.bank, 0.0008, 0.15), (self.hero, 0.0012, 0.2), (lp, 0.0045, 0.35),
                                     (hp, 0.009, 0.5)])
 
@@ -816,6 +1167,8 @@ class Scene:
             for (sxw, szw, y0w, y1w, w0) in self.city.spires:
                 if za <= szw < zb:
                     top = min(top, int(hy + f * (CAM_H - y1w) / szw) - 4)
+            if za <= TT_Z < zb:
+                top = min(top, int(hy + f * (CAM_H - TT_H) / TT_Z) - 6)
             top = max(0, min(top, int(hy + f * CAM_H / zb) - 2))
             bot = int(min(H, math.ceil(hy + f * CAM_H / za) + 2))
             if bot <= top:
@@ -844,19 +1197,39 @@ class Scene:
                         if bh_ != (side == 1):
                             continue
                     self._draw_spire(pm, sxw, szw, y0w, y1w, w0, mx, top)
+            self._draw_trees(pm, Ed, mx, top, za, zb, side)
             for (cxw, cyw, czw, rw) in self.city.clocks:
                 if za <= czw < zb:
                     self._draw_clock(pm, Ed, on, cxw, cyw, czw, rw, mx, top)
-            if za >= 2000.0:
-                # round 9: cool aerial haze stepping up with depth (strongest on the sun axis, where the
-                # blocks otherwise repeat at one value) -> the depth steps of the city read
-                amt = 0.1 + 0.3 * min((math.log(za) - math.log(2000.0)) / math.log(4.0), 1.0)
-                xs_ = np.arange(wd, dtype=np.float32) - mx
-                ax_ = np.exp(-((xs_ - SUN_X * W) / (0.22 * W)) ** 2)
-                k_ = (amt * (0.55 + 0.45 * ax_))[None, :, None].astype(np.float32)
-                hc_ = np.array([0.56, 0.5, 0.74], np.float32)
-                pm[..., :3] = pm[..., :3] * (1 - k_) + hc_ * pm[..., 3:4] * k_
-                Ed = Ed * (1 - 0.6 * k_)
+            # round 13: depth haze on every plate (aerial perspective). Amount grows with depth; the haze is
+            # a luminous warm peach-gold around the sun (it LIFTS values, the city dissolves into the glow as in
+            # yn_08 / wwy_07) and a pale lilac away from it; thicker at the foot of each plate (ground haze)
+            zr_ = max(za, 1.0)
+            amt = float(np.clip(0.05 + 0.6 * math.log(zr_ / 900.0) / math.log(9.0), 0.05, 0.72))
+            xs_ = np.arange(wd, dtype=np.float32) - mx
+            rel_ = xs_ - SUN_X * W
+            ax_ = np.exp(-(rel_ / (0.2 * W)) ** 2)
+            ax2_ = np.exp(-(rel_ / (0.42 * W)) ** 2)
+            ys_ = (np.arange(hd, dtype=np.float32) + top)
+            # vertical: strongest near the horizon line and at the plate foot, lighter on high tower tops
+            vy_ = 0.55 + 0.45 * C.smoothstep(hy - 0.22 * H, hy + 0.02 * H, ys_) + 0.25 * C.smoothstep(
+                top + 0.3 * hd, top + hd, ys_)
+            k_ = np.clip(amt * (0.62 + 0.4 * ax2_ + 0.12 * ax_)[None, :] * vy_[:, None], 0, 0.75)[..., None]
+            # round 14: yn_08 - the city recedes into a lilac-grey haze; peach only in a tight cone under the sun
+            wrm = np.where(rel_ < 0, 0.1 + 0.9 * np.exp(-(rel_ / (0.16 * W)) ** 2),
+                           np.exp(-(rel_ / (0.1 * W)) ** 2)).astype(np.float32)
+            warm_c = np.array([0.98, 0.72, 0.6], np.float32)
+            cool_c = np.array([0.6, 0.58, 0.76], np.float32)
+            hc_ = (wrm[:, None] * warm_c + (1 - wrm[:, None]) * cool_c)[None]
+            # the core of the glow: hot and pale
+            hc_ = hc_ + (ax_[None, :, None] ** 2) * np.array([0.22, 0.16, 0.08], np.float32) * min(amt * 2.0, 1.0)
+            k_ = k_.astype(np.float32)
+            pm[..., :3] = pm[..., :3] * (1 - k_) + hc_.astype(np.float32) * pm[..., 3:4] * k_
+            Ed = Ed * (1 - 0.7 * k_)
+            if za <= TT_Z < zb and side != 2:
+                # round 14: drawn after the plate haze with its own lighter veil (the landmark keeps its
+                # international orange, a dusky backlit silhouette as in yn_08)
+                self._draw_tokyo_tower(pm, Ed, on, mx, top)
             self.bands.append(dict(za=za, zb=zb, zrep=zrep, mx=mx, top=top, bot=bot, pm=pm,
                                    E=np.ascontiguousarray(Ed), on=np.ascontiguousarray(on)))
 
@@ -891,6 +1264,215 @@ class Scene:
         m = m * vis
         sub[..., :3] = sub[..., :3] * (1 - m[..., None]) + c * m[..., None]
         sub[..., 3] = sub[..., 3] * (1 - m) + m
+
+    def _draw_trees(self, pm, E, mx, top, za, zb, side):
+        """round 14: park / shrine-grove canopies (yn_07). Each tree is a cauliflower clump of 6-10 lobes; every
+        lobe is painted as a deep blue-green shadow mass with a warm olive-gold crescent on the side toward the
+        afterglow (crisp lit edge, lost shadow edge). Drawn far -> near into a 2x canvas with its own depth,
+        then depth-tested against the band plate and hazed like the buildings at that depth."""
+        f, hy, W = self.f, self.hy, self.W
+        trees = [t_ for t_ in self.city.trees if za <= t_[1] < zb]
+        if side:
+            trees = [t_ for t_ in trees if (t_[1] >= TR_A + TR_B * t_[0]) == (side == 1)]
+        if not trees:
+            return
+        trees.sort(key=lambda t_: -t_[1])
+        h, w = pm.shape[:2]
+        ss = 2
+        col = np.zeros((h * ss, w * ss, 3), np.float32)
+        al = np.zeros((h * ss, w * ss), np.float32)
+        izc = np.zeros((h * ss, w * ss), np.float32)
+        sunx_px = SUN_X * W + mx
+        for (xw, zw, ht, rw, sd) in trees:
+            q = np.random.default_rng(sd)
+            sc = f / zw * ss
+            cxp = (W / 2 + f * xw / zw + mx) * ss
+            gy = (hy + f * (CAM_H - 0.0) / zw - top) * ss
+            R = rw * sc
+            if R < 0.6:
+                continue
+            cyp = (hy + f * (CAM_H - (ht - rw * 0.9)) / zw - top) * ss
+            if cxp < -3 * R or cxp > w * ss + 3 * R or cyp < -3 * R or cyp > h * ss + 3 * R:
+                continue
+            ldir = 1.0 if cxp / ss < sunx_px else -1.0          # the lit side faces the afterglow
+            # per-tree hue: deep green / blue-green / a few olive and dark cedar
+            hue = q.random()
+            if hue < 0.5:
+                sh_c = np.array([0.05, 0.12, 0.1]); md_c = np.array([0.1, 0.2, 0.13])
+            elif hue < 0.8:
+                sh_c = np.array([0.05, 0.1, 0.13]); md_c = np.array([0.08, 0.17, 0.17])
+            else:
+                sh_c = np.array([0.1, 0.13, 0.08]); md_c = np.array([0.18, 0.22, 0.11])
+            lit_c = np.array([0.62, 0.5, 0.22]) * q.uniform(0.8, 1.1)
+            lobes = [(0.0, 0.0, 1.0)]
+            for k in range(int(q.integers(6, 11))):
+                a = q.uniform(-math.pi, 0.15)          # mostly on the upper half: cauliflower top
+                d = q.uniform(0.45, 0.8)
+                lobes.append((math.cos(a) * d, math.sin(a) * d * 0.85, q.uniform(0.38, 0.62)))
+            lobes.sort(key=lambda l_: -l_[1])           # lower lobes first
+            zinv = 1.0 / zw
+            # trunk shadow under the canopy
+            cv2.rectangle(col, (int(cxp - 0.15 * R), int(cyp)), (int(cxp + 0.15 * R), int(gy)), tuple(float(c) for c in sh_c * 0.7), -1)
+            cv2.rectangle(al, (int(cxp - 0.15 * R), int(cyp)), (int(cxp + 0.15 * R), int(gy)), 1.0, -1)
+            cv2.rectangle(izc, (int(cxp - 0.15 * R), int(cyp)), (int(cxp + 0.15 * R), int(gy)), zinv, -1)
+            # pass 1: the canopy body (one mass, value varies a little lobe to lobe)
+            for (ox, oy, rr) in lobes:
+                px, py, pr = cxp + ox * R, cyp + oy * R, max(rr * R, 0.7)
+                bc = sh_c * (0.85 + 0.3 * q.random()) + md_c * 0.35 * max(-oy, 0.0)
+                cv2.circle(col, (int(px), int(py)), int(round(pr)), tuple(float(c) for c in bc), -1, cv2.LINE_AA)
+                cv2.circle(al, (int(px), int(py)), int(round(pr)), 1.0, -1, cv2.LINE_AA)
+                cv2.circle(izc, (int(px), int(py)), int(round(pr)), zinv, -1)
+            # pass 2: lit caps on the upper lobes, clusters of small dabs toward the light (no ball shading)
+            for (ox, oy, rr) in lobes:
+                up = max(-oy, 0.0)
+                if up < 0.15 and q.random() < 0.7:
+                    continue
+                pr = max(rr * R, 0.7)
+                for j in range(int(q.integers(2, 5))):
+                    a_ = q.uniform(-2.4, -0.7) if ldir < 0 else q.uniform(-2.4, -0.7) + 0.0
+                    ax_ = math.cos(a_) * (-ldir) if False else math.cos(a_)
+                    dxl = (0.35 + 0.3 * q.random()) * pr * (-ldir if ldir < 0 else 1.0) * (1 if ax_ > 0 else -1)
+                    px = cxp + ox * R + dxl * 0.6 + ldir * 0.25 * pr
+                    py = cyp + oy * R - (0.3 + 0.35 * q.random()) * pr
+                    rd = pr * q.uniform(0.18, 0.38)
+                    lc = md_c * 0.5 + lit_c * (0.35 + 0.65 * up) * q.uniform(0.6, 1.0)
+                    cv2.circle(col, (int(px), int(py)), max(int(round(rd)), 1), tuple(float(c) for c in lc), -1,
+                               cv2.LINE_AA)
+        dn = lambda a: cv2.resize(a, (w, h), interpolation=cv2.INTER_AREA)
+        m = dn(al)
+        c = dn(col) / np.maximum(m[..., None], 1e-4) * np.minimum(m[..., None] / np.maximum(m[..., None], 1e-4), 1)
+        c = dn(col * np.minimum(al, 1)[..., None]) / np.maximum(m[..., None], 1e-4)
+        tz = cv2.resize(izc, (w, h), interpolation=cv2.INTER_NEAREST)
+        izs = self._izd
+        zr = 1.0 / np.maximum(tz, 1e-6)
+        vis = np.clip((tz - izs) * zr * zr * 0.08 + 0.5, 0.0, 1.0)
+        vis = np.where(izs <= 0, 1.0, vis)
+        # distance fog toward the band haze colour (the shader fog the buildings get)
+        zc = 0.5 * (za + min(zb, 12000.0))
+        dd = max(zc - 700.0, 0.0) / FOG_Z
+        fa = 1.0 - math.exp(-(0.1 * dd + 0.55 * dd ** 1.6))
+        c = c * (1 - fa) + np.array([0.3, 0.3, 0.44], np.float32) * fa
+        m = np.clip(m, 0, 1) * vis
+        m = m.astype(np.float32)
+        pm[..., :3] = pm[..., :3] * (1 - m[..., None]) + c.astype(np.float32) * m[..., None]
+        pm[..., 3] = pm[..., 3] * (1 - m) + m
+        E *= (1 - m[..., None])
+
+    def _draw_tokyo_tower(self, pm, E, on, mx, top):
+        """round 14: Tokyo Tower (yn_07 / yn_08 / wwy_07): a four-legged lattice seen corner-on (three legs
+        read), curved splayed legs, X-braced panels, the two observation decks with lit window bands, the
+        antenna mast, international-orange / white bands. Backlit by the afterglow on its right: warm-shadow
+        orange body, a crisp gold rim on the sun-side edges of every member; the back faces show through the
+        lattice darker. Depth-tested against the band plate."""
+        f, hy, W = self.f, self.hy, self.W
+        xw, zw = self.city.tokyo
+        h, w = pm.shape[:2]
+        ss = 4
+        X = lambda xx: W / 2 + f * (xw + xx) / zw + mx
+        Y = lambda yy: hy + f * (CAM_H - yy) / zw - top
+        hwf = lambda y: 3.6 + 38.4 * max(1.0 - y / 262.0, 0.0) ** 1.55     # face half width (m)
+        bx0 = int(max(X(-60) - 4, 0)); bx1 = int(min(X(60) + 4, w))
+        by0 = int(max(Y(TT_H) - 4, 0)); by1 = int(min(Y(0.0) + 2, h))
+        if bx1 <= bx0 or by1 <= by0:
+            return
+        sw_, sh_ = (bx1 - bx0) * ss, (by1 - by0) * ss
+        P = lambda xx, yy: (int(round((X(xx) - bx0) * ss)), int(round((Y(yy) - by0) * ss)))
+        mpx = f / zw * ss                         # supersampled px per metre
+        front = np.zeros((sh_, sw_), np.uint8)
+        back = np.zeros((sh_, sw_), np.uint8)
+        solid = np.zeros((sh_, sw_), np.uint8)
+        winm = np.zeros((sh_, sw_), np.uint8)
+        # corner-on view (rotated 20 deg): leg x = c * hw(y); front legs -0.6 / +1.28, back legs +0.6 / -1.28
+        cf = [-1.281, -0.598, 1.281]
+        cb = [0.598]
+        ys = np.linspace(0.0, 252.0, 64)
+
+        def leg(c, img, wm):
+            for y0, y1 in zip(ys[:-1], ys[1:]):
+                lw = max(int(round(wm * (0.6 + 2.6 * hwf(y0) / 40.0) * mpx)), 1)
+                cv2.line(img, P(c * hwf(y0), y0), P(c * hwf(y1), y1), 1, lw)
+        for c in cb:
+            leg(c, back, 0.8)
+        for c in cf:
+            leg(c, front, 1.0)
+        # braced panels on the two visible faces and (thinner) the back face
+        faces = [(-1.281, -0.598, front, 1.0), (-0.598, 1.281, front, 1.0), (1.281, 0.598, back, 0.6),
+                 (0.598, -1.281, back, 0.6)]
+        lev = [0.0]
+        while lev[-1] < 245.0:
+            lev.append(lev[-1] + max(1.25 * hwf(lev[-1]), 7.0))
+        lev[-1] = 250.0
+        for (ca, cb_, img, k) in faces:
+            for y0, y1 in zip(lev[:-1], lev[1:]):
+                if 136.0 < y0 < 158.0 or 220.0 < y0 < 238.0:
+                    continue
+                bw = max(int(round(0.55 * k * mpx)), 1)
+                cv2.line(img, P(ca * hwf(y0), y0), P(cb_ * hwf(y1), y1), 1, bw)
+                cv2.line(img, P(cb_ * hwf(y0), y0), P(ca * hwf(y1), y1), 1, bw)
+                cv2.line(img, P(ca * hwf(y1), y1), P(cb_ * hwf(y1), y1), 1, max(int(round(0.8 * k * mpx)), 1))
+        # arch between the front legs (the open base)
+        # observation decks (octagonal drums: silhouette slightly wider than the lattice)
+        for (ya, yb, ex) in ((138.0, 157.0, 1.35), (221.0, 236.0, 1.6)):
+            hx = 1.281 * hwf(0.5 * (ya + yb)) * ex / 1.281 * 1.281
+            pts = np.array([P(-hx, ya), P(hx, ya), P(hx * 1.04, ya + 0.5 * (yb - ya)), P(hx, yb), P(-hx, yb),
+                            P(-hx * 1.04, ya + 0.5 * (yb - ya))], np.int32)
+            cv2.fillPoly(solid, [pts], 1)
+            for (wa, wb) in ((ya + 0.2 * (yb - ya), ya + 0.42 * (yb - ya)), (ya + 0.58 * (yb - ya), ya + 0.8 * (yb - ya))):
+                cv2.rectangle(winm, P(-hx * 0.97, wb), P(hx * 0.97, wa), 1, -1)
+        # antenna: lattice box + mast
+        for (ya, yb, hx) in ((250.0, 262.0, 3.6), (262.0, 283.0, 2.4), (283.0, 300.0, 1.5)):
+            cv2.rectangle(solid, P(-hx, yb), P(hx, ya), 1, -1)
+        pts = np.array([P(-0.9, 300.0), P(0.9, 300.0), P(0.25, TT_H), P(-0.25, TT_H)], np.int32)
+        cv2.fillPoly(solid, [pts], 1)
+        for y_ in (268.0, 290.0):
+            cv2.rectangle(solid, P(-3.4, y_ + 1.6), P(3.4, y_), 1, -1)
+        # colour: international orange with white bands (painted by height)
+        yy_ = np.arange(sh_, dtype=np.float32) / ss + by0
+        hgt = CAM_H - (yy_ + top - hy) * zw / f                              # world height of each row
+        white = np.zeros_like(hgt)
+        for (a_, b_) in ((88, 100), (118, 128), (170, 180), (198, 208), (240, 250), (262, 270), (283, 291), (305, 312)):
+            white = np.maximum(white, ((hgt >= a_) & (hgt < b_)).astype(np.float32))
+        orange = np.array([0.86, 0.22, 0.09], np.float32)
+        whc = np.array([0.66, 0.62, 0.72], np.float32)
+        base_c = orange[None] * (1 - white[:, None]) + whc[None] * white[:, None]            # (rows, 3)
+        vgrad = (0.72 + 0.35 * np.clip(hgt / 300.0, 0, 1))[:, None]
+        fm = front.astype(np.float32)
+        bm = back.astype(np.float32) * (1 - fm)
+        sm = solid.astype(np.float32)
+        cov = np.maximum(np.maximum(fm, bm), sm)
+        # sun-side rim: members whose right neighbour (toward the afterglow) is open sky
+        sh_px = max(int(round(0.9 * ss)), 1)
+        allm = cov
+        nb = np.zeros_like(allm)
+        nb[:, :-sh_px] = allm[:, sh_px:]
+        rim = np.clip(allm - nb, 0, 1)
+        col = base_c[:, None, :] * vgrad[:, :, None] * (0.72 * fm + 0.45 * bm + 0.62 * sm)[..., None]
+        col = col + rim[..., None] * np.array([1.25, 0.72, 0.38], np.float32) * (0.4 + 0.6 * np.clip(hgt / 250.0, 0, 1))[:, None, None]
+        col = col + (sm * (1 - winm))[..., None] * np.array([0.05, 0.05, 0.1], np.float32)
+        wm_ = winm.astype(np.float32) * sm
+        col = col * (1 - wm_[..., None]) + wm_[..., None] * np.array([0.35, 0.28, 0.22], np.float32)
+        # landmark lighting just coming on: faint sodium glow on the legs, lit deck windows
+        em = fm[..., None] * np.array([0.12, 0.05, 0.015], np.float32) * np.clip(1 - hgt / 250.0, 0.3, 1)[:, None, None]
+        em = em + wm_[..., None] * np.array([1.0, 0.82, 0.55], np.float32) * 0.55
+        dn = lambda a: cv2.resize(a, (bx1 - bx0, by1 - by0), interpolation=cv2.INTER_AREA)
+        m = dn(cov)
+        c = dn(col * cov[..., None]) / np.maximum(m[..., None], 1e-4)
+        e = dn(em)
+        izs = self._izd[by0:by1, bx0:bx1]
+        vis = np.clip((1.0 / (zw - 2.0) - izs) * zw * zw * 0.05 + 0.5, 0.0, 1.0).astype(np.float32)
+        m = (m * vis).astype(np.float32)
+        # light aerial veil: lilac-rose, thicker toward the base
+        fy = np.clip((yy_ - 0) / 1.0, 0, 1)
+        kz = (0.12 + 0.2 * np.clip(1 - hgt / 250.0, 0, 1))
+        kz = cv2.resize(kz[:, None].astype(np.float32), (1, by1 - by0), interpolation=cv2.INTER_AREA)[:, 0]
+        c = c * (1 - kz[:, None, None]) + np.array([0.72, 0.5, 0.6], np.float32) * kz[:, None, None]
+        sub = pm[by0:by1, bx0:bx1]
+        sub[..., :3] = sub[..., :3] * (1 - m[..., None]) + c * m[..., None]
+        sub[..., 3] = sub[..., 3] * (1 - m) + m
+        Es = E[by0:by1, bx0:bx1]
+        Es[:] = Es * (1 - m[..., None]) + e * vis[..., None]
+        onl = on[by0:by1, bx0:bx1]
+        onl[:] = np.where(e.sum(-1) > 1e-3, -10.0, onl)
 
     def _draw_clock(self, pm, E, on, xw, yw, zw, rw, mx, top):
         """Lit clock face (pale warm disc, dark hands) on the Docomo-like crown."""
@@ -1201,6 +1783,7 @@ class Scene:
         pw = W + 2 * mx
         self.fg_mx_tmp = mx
         top = int(0.18 * H)
+        self.fg_top_tmp = top
         h = H - top
         ss = 3
         col = np.zeros((h * ss, pw * ss, 3), np.float32)
@@ -1284,9 +1867,10 @@ class Scene:
             onm[ys_, xs_] = np.where(mm > 0.05, -10.0, onm[ys_, xs_])
 
         rng = np.random.default_rng(91)
-        wall = np.array([0.06, 0.08, 0.15], np.float32)       # camera-facing wall: cool teal-navy
-        wall2 = np.array([0.04, 0.045, 0.1], np.float32)
-        roof = np.array([0.13, 0.12, 0.24], np.float32)       # roof deck reflecting the violet sky
+        # round 13: shaded grey concrete (was a flat navy-purple slab)
+        wall = np.array([0.105, 0.112, 0.15], np.float32)     # camera-facing wall: cool shade on concrete
+        wall2 = np.array([0.055, 0.06, 0.1], np.float32)
+        roof = np.array([0.2, 0.18, 0.26], np.float32)        # roof deck reflecting the violet sky
         steel = np.array([0.05, 0.055, 0.11], np.float32)
         rim = np.array([1.25, 0.66, 0.4], np.float32)
         rimp = np.array([0.95, 0.5, 0.55], np.float32)
@@ -1298,46 +1882,21 @@ class Scene:
         fill([(xl0, yb), (xl1 - 0.012, yb), (xl1, yr), (xl0, yr)], roof)
         # side wall (facing right, away from the glow)
         fill([(xl1, yr), (xl1 + 0.022, yr - 0.012), (xl1 + 0.022, 1.01), (xl1, 1.01)], wall2)
-        # wall panel seams and floor slab lines (catching a little sky light)
-        for x in np.arange(xl0, xl1, 0.034):
-            ln((x, yr + 0.004), (x, 1.01), wall * 1.3, 0.8)
+        # floor slab lines (catching a little sky light); round 12: no regular panel-seam outlines
         for fy in (0.897, 0.957):
             ln((xl0, fy), (xl1, fy), wall * 1.45, 1.2)
-        # office windows: panes in tenant runs - warm tungsten / fluorescent / a few cool, dark ones mirror
-        # the dusk sky (lighter at the top); blinds half-drawn on some; a few runs switch on during the shot
-        pane = 0.0155
-        for fy in (0.905, 0.965):
-            run, state = 0, None
-            for x in np.arange(xl0 + 0.01, xl1 - 0.014, pane):
-                if run <= 0:
-                    u_ = rng.random()
-                    state = 'warm' if u_ < 0.3 else ('fluo' if u_ < 0.5 else ('cool' if u_ < 0.56 else 'dark'))
-                    run = int(rng.integers(2, 8))
-                    ont = -10.0 if rng.random() < 0.55 else float(rng.uniform(0.6, 4.8))
-                    blind = rng.uniform(0.15, 0.6) if rng.random() < 0.4 else 0.0
-                run -= 1
-                x0q, x1q = x + 0.0012, x + pane - 0.0012
-                y0q, y1q = fy + 0.002, fy + 0.03
-                fill([(x0q, y0q), (x1q, y0q), (x1q, y1q), (x0q, y1q)], np.array([0.1, 0.1, 0.22], np.float32))
-                fill([(x0q, y0q), (x1q, y0q), (x1q, y0q + 0.01), (x0q, y0q + 0.01)],
-                     np.array([0.26, 0.18, 0.34], np.float32))
-                fill([(x0q, y1q - 0.006), (x1q, y1q - 0.006), (x1q, y1q), (x0q, y1q)],
-                     np.array([0.05, 0.05, 0.12], np.float32))
-                if state != 'dark':
-                    c_ = {'warm': np.array([1.1, 0.6, 0.28]), 'fluo': np.array([1.0, 0.94, 0.8]),
-                          'cool': np.array([0.62, 0.8, 1.05])}[state] * rng.uniform(0.45, 0.6)
-                    yb_ = y0q + (y1q - y0q) * blind
-                    mb = rect(Q(x0q, yb_), Q(x1q, y1q))
-                    emi[mb] = c_
-                    onm[mb] = ont
-                    if blind > 0:
-                        mb2 = rect(Q(x0q, y0q), Q(x1q, yb_))
-                        emi[mb2] = c_ * 0.35
-                        onm[mb2] = ont
-        # mullions over the windows
-        for fy in (0.905, 0.965):
-            for x in np.arange(xl0 + 0.01, xl1 - 0.012, pane):
-                ln((x, fy), (x, fy + 0.03), wall, 1.4)
+        # round 13: painted concrete (seams, mottling, rain stains, cool shade / warm spill) - the windows,
+        # signs and fittings are painted over it afterwards
+        qa, qb = Q(xl0, yr), Q(xl1, 1.0)
+        FGH.weather_wall(col, max(qa[1], 0), HH, max(qa[0], 0), min(qb[0], WW),
+                         lambda px_: (px_ / ss - mx) / W, lambda py_: (py_ / ss + top) / H, 31, ss, H,
+                         seam_fx=list(np.arange(xl0 + 0.02, xl1, 0.047)), sills_fy=[yr + 0.004, 0.897, 0.957],
+                         top_fy=yr, sun_fx=xl1, rim=rim)
+        roofq0, roofq1 = Q(xl0, yb), Q(xl1, yr)
+        FGH.weather_wall(col, max(roofq0[1], 0), roofq1[1], max(roofq0[0], 0), min(roofq1[0], WW),
+                         lambda px_: (px_ / ss - mx) / W, lambda py_: (py_ / ss + top) / H, 37, ss, H,
+                         seam_fx=[], sills_fy=[], top_fy=yb, sun_fx=xl1, rim=rim)
+        self._near_windows(W, H, ss, col, al, emi, onm, Q, rect, fill, ln, xl0, xl1, rng)
         # company sign on the parapet wall: lit white panel with real Japanese lettering (red)
         sx0_, sx1_, sy0_, sy1_ = 0.03, 0.19, 0.864, 0.891
         fill([(sx0_, sy0_), (sx1_, sy0_), (sx1_, sy1_), (sx0_, sy1_)], np.array([0.2, 0.2, 0.26], np.float32))
@@ -1348,15 +1907,17 @@ class Scene:
                    c=(0.5, 0.05, 0.04), e=(0.75, 0.06, 0.04), replace_e=True)
         # parapet coping with a hot rim along the top edge
         ln((xl0, yr), (xl1, yr), wall * 1.3, 3.0)
-        ln((xl0, yr - 0.0015), (xl1 - 0.002, yr - 0.0015), rim, 2.2, e=np.array([0.5, 0.22, 0.1], np.float32))
+        ln((xl0, yr - 0.0015), (xl1 - 0.002, yr - 0.0015), rim * 0.85, 1.8)
+        ln((xl0, yr + 0.002), (xl1, yr + 0.002), np.array([0.5, 0.24, 0.2], np.float32), 2.0)
         ln((xl1, yr), (xl1 + 0.022, yr - 0.012), rim * 0.6, 1.2)
         # railing along the roof edge (posts + two rails), rim-lit tops
         rh = 0.045
         for x in np.arange(xl0, xl1, 0.018):
             ln((x, yr), (x, yr - rh), steel, 2.0)
-            ln((x - 0.0008, yr), (x - 0.0008, yr - rh), rim * 0.55, 0.8)
+            ln((x - 0.0008, yr), (x - 0.0008, yr - rh), rim * (0.7 + 0.5 * math.exp(-abs(x - SUN_X) / 0.2)), 0.9)
         ln((xl0, yr - rh), (xl1, yr - rh), steel, 2.2)
-        ln((xl0, yr - rh - 0.0014), (xl1, yr - rh - 0.0014), rim, 1.1)
+        ln((xl0, yr - rh - 0.0009), (xl1, yr - rh - 0.0009), rim * 0.75, 0.9)
+        ln((xl0, yr - rh - 0.0012), (xl1, yr - rh - 0.0012), np.array([0.2, 0.2, 0.32], np.float32), 0.9)
         ln((xl0, yr - rh * 0.5), (xl1, yr - rh * 0.5), steel, 1.4)
         # AC units on the roof deck (boxes with fan grilles and slats)
         for (ax, aw, ah) in ((0.04, 0.03, 0.03), (0.075, 0.025, 0.026), (0.225, 0.035, 0.034), (-0.08, 0.04, 0.03)):
@@ -1619,6 +2180,79 @@ class Scene:
         self.mast, self.mast_E, self.mast_on = _pack(P2)
         self.fg_light = ((mxf * W + mx), (mtip - 0.06) * H - top)
 
+    def _near_windows(self, W, H, ss, col, al, emi, onm, Q, rect, fill, ln, xl0, xl1, rng):
+        """Round 12: office windows painted as glass, not outlined boxes. Unlit panes mirror the dusk sky (a
+        pale lilac top fading to deep blue, a broad soft reflected-cloud diagonal running across several
+        panes); lit panes glow with an interior: a bright ceiling-light strip, a warm-to-dim falloff, desk
+        partitions / shelving and the odd figure as dark shapes, blinds on some. Thin mullions."""
+        pane = 0.0155
+        for ri, fy in enumerate((0.905, 0.965)):
+            run, state = 0, None
+            for x in np.arange(xl0 + 0.01, xl1 - 0.014, pane):
+                if run <= 0:
+                    u_ = rng.random()
+                    state = 'warm' if u_ < 0.28 else ('fluo' if u_ < 0.5 else ('cool' if u_ < 0.56 else 'dark'))
+                    run = int(rng.integers(2, 8))
+                    ont = -10.0 if rng.random() < 0.55 else float(rng.uniform(0.6, 4.8))
+                    blind = rng.uniform(0.15, 0.6) if rng.random() < 0.4 else 0.0
+                    lvl = rng.uniform(0.4, 0.62)
+                run -= 1
+                x0q, x1q = x + 0.001, x + pane - 0.001
+                y0q, y1q = fy + 0.002, fy + 0.03
+                sl = rect(Q(x0q, y0q), Q(x1q, y1q))
+                hh, ww = sl[0].stop - sl[0].start, sl[1].stop - sl[1].start
+                if hh < 2 or ww < 2:
+                    continue
+                gy = np.linspace(0, 1, hh, dtype=np.float32)[:, None, None]
+                gx = np.linspace(0, 1, ww, dtype=np.float32)[None, :, None]
+                # reflected sky + a broad cloud diagonal across the row (world x so it spans panes)
+                xw = x0q + gx * (x1q - x0q)
+                dg = (xw - 0.02 - ri * 0.09) * 6.0 + gy * 0.6
+                cl = np.exp(-((dg - np.round(dg / 1.7) * 1.7) / 0.28) ** 2) * 0.8
+                # round 13: the glass mirrors the teal-blue eastern sky behind the camera; every pane is tilted
+                # a hair (its own value / hue step) and carries the dark reflected skyline low down
+                tilt = rng.uniform(-0.12, 0.12)
+                sky = (np.array([0.2, 0.3, 0.42], np.float32) * (1 - gy) + np.array([0.06, 0.08, 0.14], np.float32) * gy)
+                sky = sky * (1 + tilt) + np.array([0.04, 0.0, 0.03], np.float32) * max(tilt, 0) * 4
+                skl = C.smoothstep(0.55, 0.62, gy + 0.05 * np.sin(gx * 17.0 + x * 300.0))
+                sky = sky * (1 - 0.45 * skl)
+                glass = sky * (0.85 + 0.3 * rng.random()) + cl * np.array([0.3, 0.22, 0.22], np.float32) * (1 - 0.6 * gy)
+                glass = glass * np.ones((1, ww, 1), np.float32)
+                col[sl] = glass
+                al[sl] = 1.0
+                emi[sl] = 0.0
+                if state == 'dark':
+                    continue
+                c_ = {'warm': np.array([1.1, 0.62, 0.3]), 'fluo': np.array([0.95, 0.88, 0.72]),
+                      'cool': np.array([0.62, 0.78, 1.0])}[state].astype(np.float32) * lvl *                     (0.7 if state == 'fluo' else 1.0)
+                # interior: ceiling strip, falloff toward the floor, partition / desk band, a few dark shapes
+                ceil = np.clip(1 - gy / 0.14, 0, 1) * 0.5
+                fall = 1.0 - 0.5 * gy
+                desk = C.smoothstep(0.62, 0.75, gy) * 0.45
+                shape = np.zeros((hh, ww, 1), np.float32)
+                if rng.random() < 0.35:
+                    a0 = rng.uniform(0.15, 0.6)
+                    wdt = rng.uniform(0.15, 0.35)
+                    top_ = rng.uniform(0.3, 0.55)
+                    shape = ((gx > a0) & (gx < a0 + wdt) & (gy > top_)).astype(np.float32) * 0.35
+                e = c_ * (fall + ceil) * (1 - desk) * (1 - shape)
+                if blind > 0:
+                    e = np.where(gy < blind, e * 0.35 + c_ * 0.05, e)
+                    col[sl] = np.where(gy < blind, np.array([0.34, 0.32, 0.3], np.float32), col[sl] * 0.5)
+                else:
+                    col[sl] = col[sl] * 0.5
+                emi[sl] = e * (0.8 + 0.4 * rng.random())
+                onm[sl] = ont
+        # thin mullions + transom
+        for fy in (0.905, 0.965):
+            for x in np.arange(xl0 + 0.01, xl1 - 0.012, pane):
+                ln((x, fy), (x, fy + 0.03), np.array([0.05, 0.055, 0.1], np.float32), 1.0)
+            ln((xl0 + 0.01, fy + 0.012), (xl1 - 0.014, fy + 0.012), np.array([0.05, 0.055, 0.1], np.float32), 0.7)
+            # round 13: a concrete sill ledge under each window band: lit top edge, dark drip shadow below
+            ln((xl0 + 0.006, fy + 0.0325), (xl1 - 0.01, fy + 0.0325), np.array([0.2, 0.2, 0.24], np.float32), 2.2)
+            ln((xl0 + 0.006, fy + 0.031), (xl1 - 0.01, fy + 0.031), np.array([0.34, 0.3, 0.32], np.float32), 0.8)
+            ln((xl0 + 0.006, fy + 0.0355), (xl1 - 0.01, fy + 0.0355), np.array([0.03, 0.035, 0.07], np.float32), 1.2)
+
     # ------------------------------------------------------------------ round 6: painted near facade + roofs
     def _paint_near_facade(self, W, H, ss, col, al, emi, onm, Q, rect, fill, ln, stamp_text, xl0, xl1, yr, rh,
                            wall, rim, rimp, steel, nx0, nx1, ny0, ny1):
@@ -1636,24 +2270,56 @@ class Scene:
             gx = np.clip((np.linspace(x0f, x0f + ww / ss / W, ww, dtype=np.float32)[None, :, None] - xl0) /
                          (xl1 - xl0), 0, 1)
             m = ((al[sl] > 0.5) & (emi[sl].max(-1) < 0.05))[..., None]
-            warm = np.array([0.2, 0.085, 0.08], np.float32) * (1 - gy) ** 2.2 * (0.35 + 0.65 * gx ** 1.5)
-            cool = 0.9 + 0.2 * (1 - gy)
-            col[sl] = np.where(m, col[sl] * cool + warm, col[sl])
+            # round 12: painted value masses - a warm afterglow-lit band under the coping, a cooler
+            # sky-bounce fill across the middle, the street end falling dark
+            warm = np.array([0.5, 0.3, 0.16], np.float32) * (1 - gy) ** 3.0 * (0.3 + 0.7 * gx ** 1.5)
+            coolf = np.array([0.04, 0.07, 0.15], np.float32) * np.exp(-((gy - 0.5) / 0.28) ** 2)
+            dark = 1.35 - 0.8 * gy
+            col[sl] = np.where(m, col[sl] * dark + warm + coolf, col[sl])
+        # round 11: painted value variation over the wall (broad soft patches), AO under the coping and under
+        # the company sign, grime streaks under the AC units
+        sl = rect(Q(xl0, yr + 0.003), Q(xl1, 1.01))
+        hh, ww = sl[0].stop - sl[0].start, sl[1].stop - sl[1].start
+        if hh > 1 and ww > 1:
+            nz = C.fbm(ww // 8 + 2, hh // 8 + 2, scale=5.0, octaves=4, seed=17)
+            nz = cv2.resize(nz.astype(np.float32), (ww, hh), interpolation=cv2.INTER_CUBIC)
+            nz = (nz - nz.mean()) / (nz.std() + 1e-6)
+            yy_ = (np.arange(hh, dtype=np.float32) / ss + sl[0].start / ss + self.fg_top_tmp) / H
+            ao = 0.55 + 0.45 * C.smoothstep(yr + 0.003, yr + 0.022, yy_)
+            m = ((al[sl] > 0.5) & (emi[sl].max(-1) < 0.05))[..., None]
+            k = (1.0 + 0.16 * nz)[..., None] * ao[:, None, None]
+            col[sl] = np.where(m, col[sl] * k, col[sl])
+        sl = rect(Q(0.03, 0.891), Q(0.19, 0.906))
+        hh = sl[0].stop - sl[0].start
+        if hh > 1:
+            gy = np.linspace(0, 1, hh, dtype=np.float32)[:, None, None]
+            m = (emi[sl].max(-1) < 0.05)[..., None]
+            col[sl] = np.where(m, col[sl] * (0.5 + 0.5 * gy), col[sl])
+        for (ux_, uy_) in ((-0.15, 0.94), (0.1, 0.94), (0.14, 1.0), (-0.05, 1.0)):
+            for k_ in range(6):
+                gx_ = ux_ + rng.uniform(0.002, 0.024)
+                ln((gx_, uy_ + 0.001), (gx_ + rng.uniform(-0.001, 0.001), uy_ + rng.uniform(0.012, 0.045)),
+                   wall * 0.4, rng.uniform(1.0, 2.6), a=0.4)
         # weathering: faint darker rain streaks running down from the parapet and from the window sills
         for _ in range(70):
             x = rng.uniform(xl0, xl1)
             y0 = float(rng.choice([yr + 0.004, 0.936, 0.996]))
-            ln((x, y0), (x, y0 + rng.uniform(0.01, 0.05)), wall * 0.55, rng.uniform(0.8, 2.2), a=0.22)
+            y1s = y0 + rng.uniform(0.01, 0.05)
+            wd_ = rng.uniform(0.8, 2.2)
+            if 0.026 < x < 0.194 and y0 < 0.894:
+                continue
+            ln((x, y0), (x, y1s), wall * 0.55, wd_, a=0.22)
         # pilasters with a warm edge on their sunward (right) side; window sills catching light
         for x in np.arange(xl0 + 0.055, xl1 - 0.01, 0.11):
-            ln((x, yr + 0.004), (x, 1.01), wall * 1.35, 3.2)
-            ln((x + 0.0028, yr + 0.004), (x + 0.0028, 1.01), rim * 0.42, 0.9)
+            y_s = 0.894 if 0.026 < x < 0.194 else yr + 0.004     # round 12: nothing crosses the sign
+            ln((x, y_s), (x, 1.01), wall * 1.18, 8.0, a=0.8)
+            ln((x + 0.0038, y_s), (x + 0.0038, 1.01), rim * 0.3, 1.0, a=0.6)
         for fy in (0.905, 0.965):
-            ln((xl0, fy + 0.0315), (xl1, fy + 0.0315), rimp * 0.55, 1.1)
-            ln((xl0, fy + 0.0005), (xl1, fy + 0.0005), wall * 0.5, 1.4)
+            ln((xl0, fy + 0.0315), (xl1, fy + 0.0315), rimp * 0.4, 1.4, a=0.7)
+            ln((xl0, fy + 0.0005), (xl1, fy + 0.0005), wall * 0.5, 2.4, a=0.6)
         # sunward side wall: warm-lit, darkening down, hot corner edge, slab lines, a narrow window
         sw0, sw1 = xl1, xl1 + 0.022
-        fill([(sw0, yr), (sw1, yr - 0.012), (sw1, 1.01), (sw0, 1.01)], np.array([0.42, 0.2, 0.24], np.float32))
+        fill([(sw0, yr), (sw1, yr - 0.012), (sw1, 1.01), (sw0, 1.01)], np.array([0.46, 0.27, 0.19], np.float32))
         sl = rect(Q(sw0, yr - 0.012), Q(sw1, 1.01))
         hh = sl[0].stop - sl[0].start
         if hh > 1:
@@ -1661,7 +2327,7 @@ class Scene:
             m = (al[sl] > 0.5)[..., None]
             col[sl] = np.where(m, col[sl] * (1.15 - 0.75 * gy), col[sl])
         for fy in (0.897, 0.957):
-            ln((sw0, fy), (sw1, fy - 0.004), np.array([0.62, 0.3, 0.26], np.float32), 1.3)
+            ln((sw0, fy), (sw1, fy - 0.004), np.array([0.66, 0.38, 0.24], np.float32), 1.3)
         fill([(sw0 + 0.008, 0.91), (sw0 + 0.015, 0.908), (sw0 + 0.015, 0.94), (sw0 + 0.008, 0.941)],
              np.array([0.16, 0.09, 0.18], np.float32))
         ln((sw0 + 0.0085, 0.911), (sw0 + 0.0145, 0.909), np.array([1.0, 0.62, 0.45], np.float32), 0.9,
@@ -1671,17 +2337,23 @@ class Scene:
         ln((sw0, yr), (sw1, yr - 0.012), np.array([1.4, 0.85, 0.5], np.float32), 1.6,
            e=np.array([0.6, 0.3, 0.12], np.float32))
         # railing glints: the top rail and the post heads flare toward the sun
+        # round 11: the handrail is painted dark steel; the light catches it only in a few broken strokes and
+        # specular points on the post heads, most of them toward the sun
         for x in np.arange(xl0, xl1, 0.018):
-            g = math.exp(-abs(SUN_X - x) / 0.22)
-            ln((x, yr - rh - 0.0014), (min(x + 0.018, xl1), yr - rh - 0.0014), rim * (0.6 + 0.4 * g), 1.1,
-               e=np.array([0.3, 0.14, 0.05], np.float32) * g * g)
-            mb = rect(Q(x - 0.0012, yr - rh - 0.003), Q(x + 0.0008, yr - rh + 0.0005))
-            emi[mb] += np.array([1.6, 1.05, 0.55], np.float32) * (0.25 + 1.4 * g)
-        # the coping of the parapet: a continuous specular line brightening toward the sun
+            g = math.exp(-abs(SUN_X - x) / 0.12)
+            hsh = rng.random()
+            if hsh < 0.25 + 0.6 * g:
+                x2 = min(x + 0.018 * rng.uniform(0.25, 0.8), xl1)
+                ln((x + 0.002, yr - rh - 0.0013), (x2, yr - rh - 0.0013), rim * (0.25 + 0.6 * g), 0.8)
+            if hsh < 0.5 * g:
+                mb = rect(Q(x - 0.0009, yr - rh - 0.0022), Q(x + 0.0006, yr - rh + 0.0002))
+                emi[mb] += np.array([1.6, 1.1, 0.6], np.float32) * (0.6 + 1.6 * g)
+        # the coping of the parapet: broken dashes of light, only toward the sun
         for x in np.arange(xl0, xl1, 0.02):
-            g = math.exp(-abs(SUN_X - x) / 0.2)
-            ln((x, yr - 0.0022), (min(x + 0.02, xl1), yr - 0.0022), np.array([1.3, 0.8, 0.5], np.float32) * (0.5 + 0.5 * g),
-               1.0, e=np.array([0.35, 0.18, 0.07], np.float32) * g * g)
+            g = math.exp(-abs(SUN_X - x) / 0.14)
+            if rng.random() < 0.3 + 0.6 * g:
+                ln((x, yr - 0.0022), (min(x + 0.02 * rng.uniform(0.3, 0.9), xl1), yr - 0.0022),
+                   np.array([1.1, 0.68, 0.45], np.float32) * (0.2 + 0.6 * g), 0.9)
         # textured wall AC units: slats, fan guard, rim, refrigerant pipe and a grime streak below
         for (ux_, uy_) in ((-0.15, 0.94), (0.1, 0.94), (0.14, 1.0), (-0.05, 1.0)):
             for k in range(5):
@@ -1867,6 +2539,43 @@ class Scene:
                     tuple(float(c) for c in rim), max(1, int(1.2 * ss * H / 1080)))
         ln((bx1 - 0.012, byt - 0.024), (bx1 - 0.012, byt), steel, 1.4)
 
+    def _traffic(self, em, t, truck, yaw, fga):
+        """round 14: moving traffic on the elevated expressway (secondary motion): drive-on-the-left lanes,
+        red tail-light pairs receding toward the afterglow on the left carriageway, white-gold headlights
+        coming in on the right one; each car a short streak (its lights smeared along the deck), bunched in
+        platoons, hidden behind the near rooftops / mast."""
+        W, H = self.W, self.H
+        if getattr(self, '_cars', None) is None:
+            q = np.random.default_rng(99)
+            n = 150
+            ph = np.sort(q.random(n))
+            ph = ph + 0.02 * np.sin(np.arange(n) * 0.9)     # platoons
+            self._cars = dict(ph=ph, lane=q.integers(0, 2, n), v=q.uniform(17.0, 25.0, n), br=q.uniform(0.6, 1.1, n))
+        c = self._cars
+        z0, z1 = 1080.0, 5500.0
+        L = z1 - z0
+        layer = np.zeros_like(em)
+        sc = H / 1080.0
+        for sgn, col, lx_ in ((1.0, (1.0, 0.16, 0.08), -1.0), (-1.0, (1.0, 0.9, 0.72), 1.0)):
+            zz = z0 + np.mod(c['ph'] * L + sgn * c['v'] * t + (0.37 * L if sgn < 0 else 0.0), L)
+            xa = avenue_x(zz) + lx_ * (3.2 + 3.2 * c['lane'])
+            y = 24.3
+            sx = W / 2 + self.f * (xa - truck) / zz - yaw
+            sy = self.hy + self.f * (CAM_H - y) / zz
+            # streak: a few splats trailing behind each car (along its direction of travel)
+            dz = -sgn * 5.0
+            sx2 = W / 2 + self.f * (avenue_x(zz + dz) + lx_ * (3.2 + 3.2 * c['lane']) - truck) / (zz + dz) - yaw
+            sy2 = self.hy + self.f * (CAM_H - y) / (zz + dz)
+            fog = np.exp(-(zz - 1000.0) / 3000.0)
+            r = np.clip(1.1 * sc * np.sqrt(1600.0 / zz), 0.55 * sc, 1.6 * sc)
+            amp = c['br'] * fog * (1.3 if sgn > 0 else 1.0)
+            ok = (sx > -5) & (sx < W + 5) & (sy > 0) & (sy < H)
+            for k_ in range(3):
+                a_ = k_ / 3.0
+                C.splat(layer, (sx + (sx2 - sx) * a_)[ok], (sy + (sy2 - sy) * a_)[ok], r[ok], col,
+                        (amp * (1.0 - 0.3 * a_))[ok])
+        em += layer * (1.0 - np.clip(fga, 0, 1))[..., None]
+
     # ------------------------------------------------------------------ sky life: jet + contrail, birds
     def _jet(self, img, em, t, yaw):
         W, H = self.W, self.H
@@ -2005,8 +2714,8 @@ class Scene:
     def _sun_rim(self, img, occ, occ_sky, lx, ly):
         """Warm 2-3 px rim on the tower edges that face the afterglow + halation spilling over them."""
         W, H = self.W, self.H
-        x0, x1 = int(max(lx - 0.34 * W, 0)), int(min(lx + 0.34 * W, W))
-        y0, y1 = int(0.22 * H), int(min(self.hy + 0.1 * H, H))
+        x0, x1 = 0, int(min(lx + 0.34 * W, W))
+        y0, y1 = int(0.18 * H), int(min(self.hy + 0.1 * H, H))
         city = np.clip(occ[y0:y1, x0:x1] - occ_sky[y0:y1, x0:x1], 0, 1)
         xs = np.arange(x0, x1, dtype=np.float32)[None, :]
         ys = np.arange(y0, y1, dtype=np.float32)[:, None]
@@ -2018,11 +2727,34 @@ class Scene:
         mx, my = np.broadcast_to(mx, city.shape).copy(), np.broadcast_to(my, city.shape).copy()
         nb = cv2.remap(city, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         rim = np.clip(city - nb, 0, 1)
-        w = np.exp(-d / (0.16 * W)) * C.smoothstep(self.hy + 0.06 * H, self.hy - 0.02 * H, ys)
+        # round 12: the sun-facing (left) side of the city keeps a hot gold rim far out from the sun
+        w = np.where(xs < lx, np.exp(-d / (0.4 * W)), np.exp(-d / (0.16 * W))) *             C.smoothstep(self.hy + 0.06 * H, self.hy - 0.02 * H, ys)
         rw = rim * w
         glow = cv2.GaussianBlur(rw, (0, 0), 0.004 * W)
         add = rw[..., None] * np.array([1.6, 0.9, 0.5], np.float32) * 1.3 +             glow[..., None] * np.array([1.0, 0.55, 0.3], np.float32) * 1.4
         img[y0:y1, x0:x1] += add
+
+    def _city_grade(self, img, cm, lx):
+        """round 11: split the one lavender-pink wash over the city. Screen-space (the haze is atmospheric,
+        it stays put around the sun while the city slides under it): a warm peach-gold veil only in a cone
+        around the sun; cool, darker, desaturated blue-violet / teal in the side thirds; a deep indigo base
+        under the foreground rooftops."""
+        W, H = self.W, self.H
+        if getattr(self, '_gw', None) is None:
+            gp = self.glare_pad
+            xs = np.arange(W + 2 * gp, dtype=np.float32) - (SUN_X * W + gp)
+            ys = np.arange(H, dtype=np.float32)
+            vy = 1.0 - C.smoothstep(self.hy + 0.02 * H, self.hy + 0.34 * H, ys)
+            # round 12: asymmetric - the warm veil reaches the whole left (sun-facing) side of the city, the
+            # right cluster falls off fast into the cool side
+            cone = np.where(xs < 0, 0.12 + 0.88 * np.exp(-(xs / (0.14 * W)) ** 2),
+                            np.exp(-(xs / (0.1 * W)) ** 2) * 0.8 + np.exp(-(xs / (0.22 * W)) ** 2) * 0.2)
+            self._gw = np.ascontiguousarray((cone[None, :] * vy[:, None]).astype(np.float32))
+            self._gkb = np.ascontiguousarray((C.smoothstep(0.72 * H, 1.0 * H, ys) * 0.3).astype(np.float32))
+        gx0 = int(round(self.glare_pad - (SUN_X * W - lx)))
+        img = np.ascontiguousarray(img, dtype=np.float32)
+        K.city_grade(img, np.ascontiguousarray(cm, dtype=np.float32), self._gw, gx0, self._gkb)
+        return img
 
     def _sun_compress(self, img, lx, ly, keep=None):
         W, H = self.W, self.H
@@ -2034,6 +2766,10 @@ class Scene:
             r = np.sqrt(xs[None, :] ** 2 + (ys[:, None] * 1.3) ** 2)
             self._scw = np.ascontiguousarray(np.exp(-(r / (0.42 * W)) ** 2).astype(np.float32))
         gx0 = int(round(self.glare_pad - (SUN_X * W - lx)))
+        img = np.ascontiguousarray(img, dtype=np.float32)
+        kp = np.ascontiguousarray(keep if keep is not None else np.zeros((1, 1)), dtype=np.float32)
+        K.sun_compress(img, self._scw, gx0, kp, keep is not None)
+        return img
         wm = self._scw[:, gx0:gx0 + W]
         if keep is not None:
             wm = wm * (1.0 - 0.85 * np.clip(keep, 0, 1))     # the painted cloud keeps its own values
@@ -2045,21 +2781,90 @@ class Scene:
         wm3 = wm[..., None]
         return img * (1 - wm3) + f * wm3
 
+    def _lens(self, W, H, lx, ly):
+        """round 11: Shinkai lens artefacts laid over the finished art (yn_08): a crisp starburst point at the
+        sun (hot pin-point core + thin spikes), a faint anamorphic streak through it, and soft bokeh discs
+        (pale warm / cyan / magenta, faint bright rims) scattered along the flare axis and in the sky."""
+        out = np.zeros((H, W, 3), np.float32)
+        ys = np.arange(H, dtype=np.float32)[:, None]
+        xs = np.arange(W, dtype=np.float32)[None, :]
+        dx, dy = xs - lx, ys - ly
+        d = np.sqrt(dx * dx + dy * dy) + 1e-3
+        sc = H / 1080.0
+        # pin-point core
+        core = np.exp(-(d / (2.4 * sc)) ** 2) * 1.6 + np.exp(-(d / (7.0 * sc)) ** 2) * 0.45
+        out += core[..., None] * np.array([1.0, 0.96, 0.88], np.float32)
+        # thin spikes (8, two lengths), crisp near the core
+        ang = np.arctan2(dy, dx)
+        rng = np.random.default_rng(12)
+        base = 0.21
+        for k in range(6):       # round 14: hard 6-point star
+            a0 = base + k * math.pi / 3
+            da = np.angle(np.exp(1j * (ang - a0))).astype(np.float32)
+            L = (0.085 if k % 2 == 0 else 0.06) * W * rng.uniform(0.85, 1.1)
+            wpx = 0.7 * sc + d * 0.004
+            sp = np.exp(-(da * d / wpx) ** 2) * np.exp(-d / (L * 0.4)) * np.clip(d / (3 * sc), 0, 1)
+            out += sp[..., None] * np.array([1.0, 0.9, 0.75], np.float32) * (0.8 if k % 2 == 0 else 0.5)
+        # faint anamorphic streak (cool) through the sun
+        st = np.exp(-(dy / (1.3 * sc)) ** 2) * (np.exp(-np.abs(dx) / (0.25 * W)) * 0.12 + np.exp(-np.abs(dx) / (0.04 * W)) * 0.2)
+        out += 0.0 * st[..., None]
+        # bokeh discs
+        cxf, cyf = W / 2, H * 0.45
+        axv = np.array([cxf - lx, cyf - ly], np.float32)
+        discs = []
+        # round 12: only 5 discs, all on the sun -> frame-centre flare axis (yn_08), low opacity; the empty
+        # sky carries none
+        for tpos, rr, a, c in ((0.5, 0.026, 0.04, (1.0, 0.85, 0.7)), (0.95, 0.014, 0.022, (0.7, 0.9, 1.0)),
+                               (1.45, 0.036, 0.03, (0.9, 0.72, 1.0)), (1.95, 0.017, 0.045, (1.0, 0.8, 0.6)),
+                               (-0.45, 0.012, 0.05, (1.0, 0.9, 0.75))):
+            discs.append((lx + axv[0] * tpos, ly + axv[1] * tpos, rr * W, a, c))
+        # round 13: a few larger, very soft lens discs (yn_08) off the axis, and faint ones scattered over the
+        # city glow; each disc has a faint chromatic fringe
+        for tpos, rr, a, c, ox_, oy_ in ((0.75, 0.055, 0.022, (1.0, 0.82, 0.66), 0.03, 0.06),
+                                         (1.25, 0.075, 0.016, (0.8, 0.86, 1.0), -0.05, -0.02),
+                                         (1.7, 0.048, 0.02, (1.0, 0.78, 0.9), 0.02, 0.05),
+                                         (-0.9, 0.06, 0.014, (1.0, 0.86, 0.7), 0.0, 0.1),
+                                         (0.3, 0.03, 0.03, (1.0, 0.9, 0.78), -0.02, 0.12),
+                                         (2.3, 0.035, 0.026, (0.85, 0.95, 1.0), 0.0, 0.0)):
+            discs.append((lx + axv[0] * tpos + ox_ * W, ly + axv[1] * tpos + oy_ * H, rr * W, a, c))
+        for (bx, by, R, a, c) in discs:
+            x0, x1 = int(max(bx - 1.05 * R - 4, 0)), int(min(bx + 1.05 * R + 5, W))
+            y0, y1 = int(max(by - 1.05 * R - 4, 0)), int(min(by + 1.05 * R + 5, H))
+            if x1 <= x0 or y1 <= y0:
+                continue
+            yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
+            dd = np.sqrt((xx - bx) ** 2 + (yy - by) ** 2)
+            for ch, fr in enumerate((1.025, 1.0, 0.975)):
+                Rc = R * fr
+                soft = 0.08 * Rc + 1.0 + (0.12 * Rc if R > 0.04 * W else 0.0)
+                disc = np.clip((Rc - dd) / soft, 0, 1)
+                rim_ = np.exp(-((dd - Rc * 0.93) / (0.06 * Rc + 0.6)) ** 2) * 0.6
+                inner = 0.75 + 0.25 * (dd / Rc) ** 2
+                v = (disc * inner + rim_ * disc) * a
+                out[y0:y1, x0:x1, ch] += v * c[ch]
+        return out.astype(np.float32)
+
     def _glare(self, W, H, lx, ly):
         """Sun glare at the horizon: hot core, wide warm bloom, anamorphic streaks, ghost flares."""
-        out = F.anime_flare(W, H, lx, ly, intensity=1.0, tint=(1.0, 0.6, 0.32), rays=6, ray_len=0.07,
-                            starburst=0.8, ghosts=3.5, halo=1.6, streak=1.2, glow=1.0)
+        out = F.anime_flare(W, H, lx, ly, intensity=0.8, tint=(1.0, 0.6, 0.32), rays=6, ray_len=0.07,
+                            starburst=0.9, ghosts=0.0, halo=0.8, streak=0.0, glow=0.55)
         # long thin anamorphic line through the whole frame + a second, softer band
         ys = np.arange(H, dtype=np.float32)[:, None]
         xs = np.arange(W, dtype=np.float32)[None, :]
         dy = ys - ly
         dx = np.abs(xs - lx)
         s1 = np.exp(-(dy / (0.0018 * H)) ** 2) * (np.exp(-dx / (0.45 * W)) * 0.5 + np.exp(-dx / (0.08 * W)) * 0.6)
-        s2 = np.exp(-(dy / (0.012 * H)) ** 2) * np.exp(-dx / (0.3 * W)) * 0.12
+        s2 = np.zeros_like(s1)     # round 14: one thin anamorphic line only
         # wide halation core: the afterglow wraps the silhouettes of the towers nearest the sun
         r = np.sqrt((xs - lx) ** 2 + ((ys - ly) * 1.25) ** 2)
-        hal = np.exp(-(r / (0.065 * W)) ** 2) * 0.55 + np.exp(-r / (0.15 * W)) * 0.22
+        hal = np.exp(-(r / (0.045 * W)) ** 2) * 0.5 + np.exp(-r / (0.1 * W)) * 0.18
         out += hal[..., None] * np.array([1.0, 0.6, 0.34], np.float32)
+        # round 13: the glow does not stop at the skyline - a luminous warm veil hangs over the city below
+        # the sun (the air between the camera and the afterglow), fading down the frame
+        dyb = np.maximum(ys - ly, 0.0)
+        veil = np.exp(-((xs - lx) / (0.12 * W)) ** 2) * np.exp(-dyb / (0.09 * H)) * C.smoothstep(ly - 0.07 * H, ly + 0.01 * H, ys)
+        veil = veil + 0.5 * np.exp(-((xs - lx) / (0.45 * W)) ** 2) * np.exp(-dyb / (0.08 * H)) * C.smoothstep(ly - 0.07 * H, ly + 0.01 * H, ys)
+        out += (veil * 0.1)[..., None] * np.array([1.0, 0.64, 0.4], np.float32)
         out += (s1[..., None] * np.array([0.75, 0.82, 1.0], np.float32) +
                 s2[..., None] * np.array([1.0, 0.65, 0.45], np.float32))
         return out.astype(np.float32)
@@ -2085,36 +2890,50 @@ class Scene:
         img = np.ascontiguousarray(self._birds(img, t, yaw), dtype=np.float32)
         occ_sky = occ.copy()
         self.clouds_a = cls[0][..., 3] * 0 + np.maximum(cls[0][..., 3], cls[1][..., 3])
+        # round 14: the city coverage is tracked on its own (it was occ - occ_sky, which dropped the city grade
+        # / rims in cloud-shaped patches wherever the cumulus sat behind a tower)
+        occ_city = np.zeros((H, W), np.float32)
+        zero_ = np.zeros((H, W), np.float32)
         for bd in self.bands:
             shift = -self.f * truck / bd['zrep'] - yaw - bd['mx']
-            K.composite_band(img, em, occ, bd['pm'], bd['E'], bd['on'], bd['top'], float(shift), float(t))
+            K.composite_band(img, em, occ_city, bd['pm'], bd['E'], bd['on'], bd['top'], float(shift), float(t))
             if 'train' in bd:
                 # outbound train on the far track (moving right), then the inbound one on the near track
                 self._train(img, em, t, truck, yaw, v=-38.0, head0=-330.0, ncar=6, side=-1.9, glint=False)
                 self._train(img, em, t, truck, yaw)
 
-        self._sun_rim(img, occ, occ_sky, lx, ly)
+        self._sun_rim(img, occ_city, zero_, lx, ly)
         shift2 = -self.f * truck / self.MAST_Z - yaw - self.fg_mx + self.MAST_OFF * W / 1920.0
-        K.composite_band(img, em, occ, self.mast, self.mast_E, self.mast_on, self.fg_top, float(shift2), float(t))
+        K.composite_band(img, em, occ_city, self.mast, self.mast_E, self.mast_on, self.fg_top, float(shift2), float(t))
         shift = -self.f * truck / self.FG_Z - yaw - self.fg_mx
-        K.composite_band(img, em, occ, self.fg, self.fg_E, self.fg_on, self.fg_top, float(shift), float(t))
+        K.composite_band(img, em, occ_city, self.fg, self.fg_E, self.fg_on, self.fg_top, float(shift), float(t))
+        # round 13: the near rooftops have little air in front of them: the glare veil / shafts / halation are
+        # held back over them (they stay cool shadow shapes with warm rims, not a mauve wash)
+        Mf = np.float32([[1, 0, shift], [0, 1, self.fg_top]])
+        fga = cv2.warpAffine(self.fg[..., 3], Mf, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        Mm = np.float32([[1, 0, shift2], [0, 1, self.fg_top]])
+        mga = cv2.warpAffine(self.mast[..., 3], Mm, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        fga = np.ascontiguousarray(np.maximum(fga, 0.6 * mga), dtype=np.float32)
+        occ = np.maximum(occ_sky, occ_city)
+        img = self._city_grade(img, occ_city, lx)
+        self._traffic(em, t, truck, yaw, fga)
         beacons = self._warning_lights(t, truck, yaw, shift, shift2)
         # lights glow: bloom the emission layer on its own (windows, train, signs, beacons)
         q = cv2.resize(em, (W // 4, H // 4), interpolation=cv2.INTER_AREA)
-        g = cv2.GaussianBlur(q, (0, 0), 0.0025 * W) * 0.9 + cv2.GaussianBlur(q, (0, 0), 0.009 * W) * 0.7
-        img += em
-        img += cv2.resize(g * 0.3, (W, H), interpolation=cv2.INTER_LINEAR)
+        g = cv2.GaussianBlur(q, (0, 0), 0.0025 * W) * 0.27 + cv2.GaussianBlur(q, (0, 0), 0.009 * W) * 0.21
+        gup = np.ascontiguousarray(cv2.resize(g, (W, H), interpolation=cv2.INTER_LINEAR), dtype=np.float32)
         # crepuscular rays fanning up from the horizon glow, cut by towers and cloud edges
-        sh_ = SK.shafts(W, H, lx, ly + 0.01 * H, occ, strength=0.8, length=0.95, radius=0.12,
+        sh_ = SK.shafts(W, H, lx, ly + 0.01 * H, occ, strength=0.48, length=0.95, radius=0.12,
                         tint=(1.0, 0.6, 0.38), t=t, streaks=0.55, n_beams=9, seed=4)
-        # rays pass behind the storm cloud: keep its painted pinks saturated
-        img += sh_ * (1 - 0.75 * self.clouds_a)[..., None]
-        # glare: precomputed on a padded canvas, slid with the pan (integer px; it is soft)
+        # rays pass behind the storm cloud (keep its painted pinks saturated); glare precomputed on a padded
+        # canvas, slid with the pan; both held back over the near rooftops (round 13, fused kernel)
         gx0 = int(round(self.glare_pad - (SUN_X * W - lx)))
-        img += self.glare[:, gx0:gx0 + W] * (0.45 * (1 - 0.6 * self.clouds_a))[..., None]
+        img = np.ascontiguousarray(img, dtype=np.float32)
+        K.post_add(img, np.ascontiguousarray(em, dtype=np.float32), gup, np.ascontiguousarray(sh_, dtype=np.float32),
+                   np.ascontiguousarray(self.clouds_a, dtype=np.float32), fga, self.glare, gx0)
         # bloom: the painted cloud interior is held out of the bloom source (no airbrushed glow outline);
         # its HDR gold lining still blooms
-        hero_vis = cls[1][..., 3] * (1 - np.clip(occ - occ_sky, 0, 1))
+        hero_vis = cls[1][..., 3] * (1 - occ_city)
         bsrc = CB4.bloom_src(img, hero_vis)
         img = img + (SK.fast_bloom(bsrc, threshold=0.8, knee=0.3, strength=0.4, halation=0.25) - bsrc)
         # highlight roll-off: the painted cloud keeps its hot pink-gold (almost no desaturation toward white)
@@ -2122,10 +2941,15 @@ class Scene:
         # afterglow region (max channel rolls off toward ~1.15 before the shoulder -> peak ~0.94), the wide
         # halation keeps carrying the brightness around it
         img = self._sun_compress(img, lx, ly, hero_vis)
-        hv = cv2.GaussianBlur(hero_vis, (0, 0), 1.5)[..., None]
-        img = F.shoulder(img, 0.82, desat=0.15) * (1 - hv) + F.shoulder(img, 0.86, desat=0.02) * hv
+        hv = np.ascontiguousarray(cv2.GaussianBlur(hero_vis, (0, 0), 1.5), dtype=np.float32)
+        img = np.ascontiguousarray(img, dtype=np.float32)
+        K.shoulder2(img, hv, 0.82, 0.15, 0.86, 0.02)
+        K.add_layer(img, self.lens, gx0, np.ascontiguousarray(self.clouds_a, dtype=np.float32), 0.5)
         self._draw_beacons(img, beacons)
         # paint / paper surface only on the painted city + near planes; the sky gradient stays clean
-        cm = np.clip(occ - occ_sky, 0, 1)
-        img = PAPER.apply(img, 1.0 + (self.paper - 1.0) * (0.12 + 0.88 * cm))
-        return F.finish_fast(img, t, sat=1.06, grain_amt=0.0025, vig=0.22, ca=0.0)
+        # round 13: + a gentle overall bloom (the frame must not read as clean vector CG)
+        q = cv2.resize(img, (W // 8, H // 8), interpolation=cv2.INTER_AREA)
+        q = cv2.GaussianBlur(np.maximum(q - 0.35, 0.0), (0, 0), 0.006 * W)
+        qu = np.ascontiguousarray(cv2.resize(q, (W, H), interpolation=cv2.INTER_LINEAR), dtype=np.float32)
+        K.paper_bloom(img, self.paper, occ_city, zero_, 0.3, qu, 0.14)
+        return F.finish_fast(img, t, sat=1.06, grain_amt=0.0055, vig=0.22, ca=0.0)

@@ -15,11 +15,13 @@ from lib import core as C
 import s06_seaside_paint as P
 import s06_seaside_foliage as FO
 import s06_seaside_leaf as LF
+import s06_seaside_tree as TR
 
 FONT = 'C:/Windows/Fonts/YuGothB.ttc'
 Z_POLE = 5.4
 Z_GRASS = 3.9
 Z_BUSH = 9.0
+TOP = 0.8       # canvas extension above the frame (fraction of H): revealed by the crane-down
 
 
 def cc(h):
@@ -73,8 +75,9 @@ class Near:
         W, H = sc.W, sc.H
         self.u = W / 1920.0
         self.mx = int(0.2 * W)
-        self.cw, self.ch = W + 2 * self.mx, H
-        self.hz = sc.HZ * H             # horizon row in frame px
+        self.T = int(round(TOP * H))
+        self.cw, self.ch = W + 2 * self.mx, H + self.T
+        self.hz = sc.HZ * H + self.T    # horizon row in canvas px (canvas row = frame row + T)
         self.f = sc.f
         self.hc = sc.hc
 
@@ -104,14 +107,16 @@ class Near:
         cv.zmode = ('c', 1.0 / Z_BUSH)
         pal = dict(deep=cc('#070d15'), shd=cc('#0e1824'), sky=cc('#1d3040'), lit=cc('#5a4632'),
                    hot=cc('#c47a4c'), rim=np.array([1.3, 0.72, 0.4], np.float32))
-        LF.clump(cv, self.X(-0.03), 1.0 * H, 0.14 * W, rng, pal, L=(1.0, -0.5), lz=-0.15, flat=0.7, leaf=0.085,
-                unit=u, rim=1.0, lit_bias=-0.05)
-        LF.clump(cv, self.X(0.105), 1.05 * H, 0.075 * W, rng, pal, L=(1.0, -0.5), lz=-0.15, flat=0.7, leaf=0.1,
-                unit=u, rim=1.0)
+        # one backlit leaf mass (s06_seaside_tree): cool dark body, warm crowns toward the sun only
+        T = self.T
+        lob = [(self.X(-0.06), 0.98 * H + T, 0.1 * W, 0.0, 0), (self.X(0.02), 0.93 * H + T, 0.075 * W, 0.0, 0),
+               (self.X(0.075), 0.99 * H + T, 0.06 * W, 0.0, 0), (self.X(0.12), 1.04 * H + T, 0.05 * W, 0.0, 0),
+               (self.X(-0.02), 1.04 * H + T, 0.08 * W, 0.0, 0)]
+        TR.canopy(cv, lob, rng, unit=u * 1.6, pal=TR.PAL_DARK, form=0.12 * W, far_haze=0.0, bias=-0.15)
         dark = cc('#101824')
         rim = cc('#ffab66')
         for k in range(30):
-            P.grass_tuft(cv, self.X(rng.uniform(-0.06, 0.2)), rng.uniform(0.95, 1.06) * H,
+            P.grass_tuft(cv, self.X(rng.uniform(-0.06, 0.2)), rng.uniform(0.95, 1.06) * H + T,
                          H * rng.uniform(0.07, 0.18), rng, dark, rim, lean=0.2, n=8, rim_amt=0.7)
 
     # ------------------------------------------------------------------ utility pole
@@ -122,7 +127,7 @@ class Near:
         f, Z = self.f, Z_POLE
         cv.zmode = ('c', 1.0 / Z)
         xc = self.X(0.905)
-        y_top, y_bot = -0.05 * H, 1.05 * H
+        y_top, y_bot = -0.02 * H, 1.05 * H + self.T
         Ybot = self.hc - (y_bot - self.hz) * Z / f
         Ytop = self.hc - (y_top - self.hz) * Z / f
         rb, rt = 0.165, 0.165 - 0.0075 * (Ytop - Ybot) / 1.0 * 0.12     # gentle taper
@@ -225,38 +230,88 @@ class Near:
             cv.poly([(xc - hwk - 2 * u, yy - 5 * u), (xc + hwk + 2 * u, yy - 5 * u), (xc + hwk + 2 * u, yy + 5 * u),
                      (xc - hwk - 2 * u, yy + 5 * u)], cc('#34324c'))
             cv.line([(xc - hwk - 2 * u, yy - 5 * u), (xc - hwk * 0.2, yy - 5 * u)], 1.2 * u, cc('#ffb27a'), 0.8)
-        # street-lamp arm: curved pipe from the clamp up and out to the left, LED head at the end
+        # street-lamp arm: a real steel pipe (tapering 9 -> 6 cm) rising from a clamp collar and curving out to
+        # the left, painted as a tube: sky-lit top half, dark core shadow low, a hot warm rim along the sun-side
+        # top edge; a short straight brace under the bend; a flat LED housing with a lit top face, dark side,
+        # glowing lens and end cap
         y0a = px(5.6)
-        tt = np.linspace(0, 1, 40)
-        axs = xc - half(y0a) - tt * f * 1.35 / Z
-        ays = y0a - (1 - (1 - tt) ** 2) * f * 0.55 / Z
+        tt = np.linspace(0, 1, 60)
+        axs = xc - half(y0a) * 0.6 - tt * f * 1.35 / Z
+        ays = y0a - (1 - (1 - tt) ** 2.2) * f * 0.55 / Z
         thk = f * 0.045 / Z
-        cv.line(np.stack([axs, ays], 1), thk, cc('#2a2842'))
-        cv.line(np.stack([axs, ays - thk * 0.35], 1), max(thk * 0.22, 1.0), cc('#ffb27a'), 0.85)
+        wa = f * (0.09 - 0.03 * tt) / Z                     # full width of the pipe along the arm
+        dx_, dy_ = np.gradient(axs), np.gradient(ays)
+        dl = np.hypot(dx_, dy_) + 1e-9
+        nx_, ny_ = dy_ / dl, -dx_ / dl                      # normal pointing up (the arm runs leftward)
+        if ny_.mean() > 0:
+            nx_, ny_ = -nx_, -ny_
+
+        def band(o0, o1, color, alpha=1.0):
+            top = np.stack([axs + nx_ * wa * o1, ays + ny_ * wa * o1], 1)
+            bot = np.stack([axs + nx_ * wa * o0, ays + ny_ * wa * o0], 1)
+            cv.poly(np.concatenate([top, bot[::-1]], 0), color, alpha)
+        # brace: a thinner straight strut from lower on the pole to the arm's bend
+        yb_ = px(5.42)
+        k_ = 11
+        bx0, by0 = xc - half(yb_) * 0.8, yb_
+        bw_ = f * 0.035 / Z
+        cv.line([(bx0, by0), (axs[k_], ays[k_] + wa[k_] * 0.3)], bw_, cc('#24223a'))
+        cv.line([(bx0, by0 - bw_ * 0.3), (axs[k_], ays[k_] + wa[k_] * 0.3 - bw_ * 0.3)], max(bw_ * 0.25, 1.0),
+                cc('#ff9e70'), 0.6)
+        band(-0.5, 0.5, cc('#262440'))                      # body (shade: backlit steel)
+        band(0.05, 0.42, cc('#3c3a5c'), 0.9)                # sky-lit upper half
+        band(-0.42, -0.18, cc('#1a1830'), 0.7)              # core shadow low on the tube
+        band(0.3, 0.5, np.array([1.45, 0.86, 0.5], np.float32), 0.9)   # warm rim on the top (sun) edge
+        band(0.42, 0.5, np.array([1.8, 1.25, 0.8], np.float32), 0.8)   # hot specular line
+        band(-0.5, -0.4, cc('#5a4a70'), 0.35)               # faint bounce on the underside
+        # clamp collar where the arm meets the pole
+        yc_ = y0a
+        hwk = half(yc_)
+        cw_ = f * 0.055 / Z
+        cv.poly([(xc - hwk - 3 * u, yc_ - cw_), (xc + hwk + 3 * u, yc_ - cw_), (xc + hwk + 3 * u, yc_ + cw_),
+                 (xc - hwk - 3 * u, yc_ + cw_)], cc('#302e4a'))
+        cv.line([(xc - hwk - 3 * u, yc_ - cw_), (xc - hwk - 3 * u, yc_ + cw_)], 1.8 * u, cc('#ffb07a'), 0.9)
+        cv.line([(xc - hwk - 3 * u, yc_ - cw_), (xc + hwk * 0.2, yc_ - cw_)], 1.2 * u, cc('#ffb07a'), 0.7)
+        # LED housing (flat cobra head), slightly tilted with the arm tip
         hx, hy = axs[-1], ays[-1]
-        hl = f * 0.42 / Z
-        head = [(hx + hl * 0.1, hy - thk * 0.8), (hx - hl, hy - thk * 0.3), (hx - hl * 1.05, hy + thk * 0.9),
-                (hx + hl * 0.05, hy + thk * 1.1)]
-        cv.poly(head, cc('#302c46'))
-        cv.line([(hx + hl * 0.1, hy - thk * 0.8), (hx - hl, hy - thk * 0.3)], 1.4 * u, cc('#ffc088'), 0.9)
-        # lamp lens (lit, warm) on the underside
-        cv.poly([(hx - hl * 0.85, hy + thk * 0.95), (hx - hl * 0.15, hy + thk * 1.05), (hx - hl * 0.15, hy + thk * 1.35),
-                 (hx - hl * 0.85, hy + thk * 1.25)], np.array([1.3, 1.05, 0.72], np.float32))
+        hl = f * 0.5 / Z
+        ht = f * 0.11 / Z
+        sl_ = (ays[-1] - ays[-4]) / (axs[-1] - axs[-4] + 1e-9)
+        def hp(xo, yo):
+            return (hx - xo, hy + yo - xo * sl_ * 0.5)
+        # socket sleeve over the pipe end
+        cv.poly([hp(-hl * 0.02, -wa[-1] * 0.7), hp(hl * 0.14, -wa[-1] * 0.75), hp(hl * 0.14, wa[-1] * 0.75),
+                 hp(-hl * 0.02, wa[-1] * 0.7)], cc('#2e2c48'))
+        body_ = [hp(hl * 0.1, -ht * 0.55), hp(hl * 0.95, -ht * 0.35), hp(hl * 1.02, ht * 0.2), hp(hl * 0.96, ht * 0.5),
+                 hp(hl * 0.1, ht * 0.5)]
+        cv.poly(body_, cc('#24223c'))
+        # lit top face (a thin wedge catching the sunset), then the rim line on its edge
+        cv.poly([hp(hl * 0.1, -ht * 0.55), hp(hl * 0.95, -ht * 0.35), hp(hl * 0.95, -ht * 0.12),
+                 hp(hl * 0.12, -ht * 0.25)], cc('#6a5474'))
+        cv.line([hp(hl * 0.1, -ht * 0.55), hp(hl * 0.95, -ht * 0.35)], 1.6 * u, np.array([1.6, 1.05, 0.66], np.float32), 0.95)
+        cv.line([hp(hl * 0.95, -ht * 0.35), hp(hl * 1.02, ht * 0.2)], 1.2 * u, cc('#ffb886'), 0.7)
+        # dark underside lip + glowing lens
+        cv.poly([hp(hl * 0.22, ht * 0.5), hp(hl * 0.9, ht * 0.5), hp(hl * 0.86, ht * 0.72), hp(hl * 0.26, ht * 0.72)],
+                np.array([1.35, 1.1, 0.78], np.float32))
+        cv.line([hp(hl * 0.22, ht * 0.5), hp(hl * 0.9, ht * 0.5)], 1.0 * u, cc('#1a1830'), 0.8)
+        thk = ht * 0.6
         self.lamp = (hx - hl * 0.5, hy + thk * 1.2)
         # drop cable: from the pole, sagging to the left, leaving through the top of the frame
         y1c = px(5.95)
         cx0 = xc - half(y1c)
-        ex, ey = self.X(0.47), -0.08 * H
+        # (the cables leave to the right, out of frame: the crane-down never reveals a loose end)
+        cx0 = xc + half(y1c)
+        ex, ey = self.X(1.2), y1c - 0.16 * H
         tt = np.linspace(0, 1, 120)
         cxs = cx0 + (ex - cx0) * tt
-        cys = y1c + (ey - y1c) * tt + 0.16 * H * 4 * tt * (1 - tt)
+        cys = y1c + (ey - y1c) * tt + 0.07 * H * 4 * tt * (1 - tt)
         cv.line(np.stack([cxs, cys], 1), max(2.2 * u, 1.0), cc('#1e1c30'))
         cv.line(np.stack([cxs, cys - 1.0 * u], 1), max(0.7 * u, 0.5), cc('#ff9e70'), 0.6)
         # second, thinner cable (telecom) with a small closure box
-        cys2 = y1c + 0.05 * H + (ey + 0.02 * H - y1c - 0.05 * H) * tt + 0.19 * H * 4 * tt * (1 - tt)
-        cxs2 = cx0 + (self.X(0.5) - cx0) * tt
+        cys2 = y1c + 0.05 * H + (ey + 0.02 * H - y1c - 0.05 * H) * tt + 0.1 * H * 4 * tt * (1 - tt)
+        cxs2 = cx0 + (self.X(1.18) - cx0) * tt
         cv.line(np.stack([cxs2, cys2], 1), max(1.6 * u, 0.8), cc('#1e1c30'))
-        k = 22
+        k = 30
         bx_, by_ = cxs2[k], cys2[k]
         cv.poly([(bx_ - 14 * u, by_ - 7 * u), (bx_ + 14 * u, by_ - 9 * u), (bx_ + 14 * u, by_ + 9 * u),
                  (bx_ - 14 * u, by_ + 11 * u)], cc('#2c2a44'))
@@ -267,7 +322,7 @@ class Near:
             ('text', '海辺食堂', cc('#1e2a4a'), 0.24, 0.8),
             ('text', 'この先すぐ', cc('#b83838'), 0.8, 0.99),
         ])
-        self._plate(cv, xc, half, px, 3.8, 3.2, cc('#2a5aa8'), [
+        self._plate(cv, xc, half, px, 3.3, 2.7, cc("#2a5aa8"), [
             ('text', '汐見町二丁目', cc('#eef0f6'), 0.04, 0.99),
         ])
 
@@ -305,7 +360,7 @@ class Near:
         u = self.u
         cv.zmode = ('c', 1.0 / Z_POLE)
         xa, xb = self.X(0.5), self.X(1.22)
-        ya, yb = 0.905 * H, 0.94 * H
+        ya, yb = 0.905 * H + self.T, 0.94 * H + self.T
         d2 = 0.065 * H
         th = 0.016 * H
 
@@ -314,9 +369,9 @@ class Near:
         # posts
         for x in np.arange(xa, xb, 0.13 * W):
             pw = 0.0065 * H
-            cv.poly([(x - pw, ry(x) - th * 0.3), (x + pw, ry(x) - th * 0.3), (x + pw, H * 1.05), (x - pw, H * 1.05)],
+            cv.poly([(x - pw, ry(x) - th * 0.3), (x + pw, ry(x) - th * 0.3), (x + pw, H * 1.05 + self.T), (x - pw, H * 1.05 + self.T)],
                     cc('#2e2e48'))
-            cv.line([(x - pw * 0.7, ry(x)), (x - pw * 0.7, H * 1.05)], max(1.3 * u, 0.8), cc('#ffb27a'), 0.7)
+            cv.line([(x - pw * 0.7, ry(x)), (x - pw * 0.7, H * 1.05 + self.T)], max(1.3 * u, 0.8), cc('#ffb27a'), 0.7)
             cv.poly([(x - pw * 1.5, ry(x) - th * 0.8), (x + pw * 1.5, ry(x) - th * 0.8), (x + pw * 1.5, ry(x) + th * 0.2),
                      (x - pw * 1.5, ry(x) + th * 0.2)], cc('#34344e'))
         # rails (galvanised pipes): cool body, hot top highlight where the low sun grazes them
@@ -345,11 +400,11 @@ class Near:
         plume = np.array([1.08, 0.8, 0.56], np.float32)
         blade = cc('#1a1a2c')
         rim = cc('#ffb070')
-        clumps = [(0.69, 0.4), (0.78, 0.36), (0.84, 0.47), (0.99, 0.44), (1.07, 0.5), (1.14, 0.4),
+        clumps = [(0.69, 0.4), (0.78, 0.36), (0.8, 0.3), (0.99, 0.31), (1.07, 0.5), (1.14, 0.4),
                   (0.19, 0.28), (-0.1, 0.36)]
         for (fx, hh) in clumps:
             bx = self.X(fx)
-            by = 1.08 * H
+            by = 1.08 * H + self.T
             # long leaves first
             P.grass_tuft(cv, bx, by, hh * 0.55 * H, rng, blade, rim, lean=0.25, n=10, width=0.45, wcv=wcv,
                          rim_amt=0.8)

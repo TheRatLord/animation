@@ -67,7 +67,7 @@ class Tree14:
         self.mz = {}
         # ---- trunk: S-curve, root flare
         ht = rng.uniform(1.0, 1.4) * s * hmul
-        r0 = rng.uniform(0.17, 0.22) * s * trunk
+        r0 = rng.uniform(0.21, 0.27) * s * trunk
         lx = sg * rng.uniform(0.15, 0.4) * ht
         b1 = rng.uniform(0.08, 0.16) * ht * rng.choice([-1, 1])
         T = _cbez([0.0, -0.1 * s], [b1, 0.35 * ht], [lx * 0.4 - b1 * 0.8, 0.72 * ht], [lx, ht], 34)
@@ -98,8 +98,11 @@ class Tree14:
         self._finish(rng)
 
     # ------------------------------------------------------------------ branches
-    def _branch(self, rng, p0, d, L, r0, depth, z, m, parent_vis):
+    def _branch(self, rng, p0, d, L, r0, depth, z, m, parent_vis, sm=None):
         s = self.s
+        if depth <= 2 or sm is None:
+            self._sm = getattr(self, '_sm', -1) + 1
+            sm = self._sm
         nn = max(8, int(26 * L / s))
         # random-walk polyline: gentle arch, kinks at a few nodes, outer part droops (more for thin wood)
         P = [np.asarray(p0, np.float64)]
@@ -111,10 +114,12 @@ class Tree14:
         for i in range(1, nn):
             a = rng.normal(0, 2.0) + curl
             if i in kinks:
-                a += rng.choice([-1, 1]) * rng.uniform(7, 16)
+                a += rng.choice([-1, 1]) * rng.uniform(4, 10)
             dd = _rot(dd, a)
             u = i / (nn - 1)
             dd = _unit(dd + np.array([0.0, -g * u * 1.5]) + (np.array([0.0, 0.025]) if u < 0.4 else 0))
+            if dd[1] < -0.3:
+                dd = _unit([dd[0], -0.3])
             P.append(P[-1] + dd * step)
         P = np.array(P)
         tt = np.linspace(0, 1, nn)
@@ -123,14 +128,12 @@ class Tree14:
         r = r0 + (r1 - r0) * tt ** 0.8
         # front-visible prefix (connected to the trunk)
         if depth == 1:
-            vis = rng.uniform(0.35, 0.75)
+            vis = rng.uniform(0.5, 0.85)
         elif parent_vis and depth == 2:
-            vis = rng.uniform(0.15, 0.6) if rng.random() < 0.75 else 0.0
-        elif parent_vis and depth == 3:
-            vis = rng.uniform(0.2, 0.5) if rng.random() < 0.3 else 0.0
+            vis = rng.uniform(0.25, 0.7) if rng.random() < 0.8 else 0.0
         else:
             vis = 0.0
-        self.wood.append(dict(P=P, r=r, z=z, d=depth, vis=vis, m=m))
+        self.wood.append(dict(P=P, r=r, z=z, d=depth, vis=vis, m=m, sm=sm))
         if depth < self.maxd:
             nl = {1: int(rng.integers(3, 5)), 2: int(rng.integers(2, 4))}.get(depth, 1)
             ts = np.sort(rng.uniform(0.2, 0.8, nl))
@@ -146,17 +149,17 @@ class Tree14:
                 if Lc < 0.15 * s:
                     continue
                 self._branch(rng, P[i], cd, Lc, max(rmin, r[i] * rng.uniform(0.5, 0.68)), depth + 1,
-                             z + rng.uniform(-0.3, 0.3), m, vis > tl)
+                             z + rng.uniform(-0.3, 0.3), m, vis > tl + 0.45 * s / L, sm)
             # terminal fork (Leonardo: children share the parent's cross-section)
             td = _unit(P[-1] - P[-3])
             share = rng.uniform(0.35, 0.65)
             for sgn, sh in ((-1, share), (1, 1 - share)):
                 cd = _rot(td, sgn * rng.uniform(15, 32))
                 self._branch(rng, P[-1], cd, L * rng.uniform(0.45, 0.62), max(rmin, r[-1] * math.sqrt(sh) * 1.05),
-                             depth + 1, z + rng.uniform(-0.3, 0.3), m, vis > 0.97)
+                             depth + 1, z + rng.uniform(-0.3, 0.3), m, vis > 0.97, sm)
         # ---- blossom sub-clusters along the outer part of depth>=2 wood (uneven spacing -> sky holes)
         if depth >= 2 or not self.big:
-            Rb = rng.uniform(0.26, 0.36) * s * self.cl_r
+            Rb = rng.uniform(0.3, 0.4) * s * self.cl_r
             t = (0.25 if depth >= 3 else 0.45) + rng.uniform(0, 0.15)
             while t <= 1.0:
                 i = int(t * (nn - 1))
@@ -167,9 +170,9 @@ class Tree14:
                 R = Rb * rng.uniform(0.7, 1.25)
                 c = P[i] + nrm * R * rng.uniform(0.05, 0.5) + rng.normal(0, 0.12, 2) * R
                 if rng.random() < 0.95 * min(1.0, self.density):
-                    self.clusters.append(dict(x=float(c[0]), y=float(c[1]), R=float(R), m=m,
-                                              z=z + rng.uniform(-0.25, 0.25), front=bool(rng.random() < 0.45)))
-                t += (R / L) * rng.uniform(0.75, 1.5) / max(self.density, 0.4)
+                    self.clusters.append(dict(x=float(c[0]), y=float(c[1]), R=float(R), m=m, sm=sm,
+                                              z=z + rng.uniform(-0.25, 0.25), front=bool(rng.random() < 0.3)))
+                t += (R / L) * rng.uniform(0.6, 1.3) / max(self.density, 0.4)
             if depth == self.maxd:
                 # twig-end spray: a thin drooping twig with a small bunch (lacy silhouette)
                 tip = P[-1]
@@ -179,10 +182,11 @@ class Tree14:
                     Lt = rng.uniform(0.1, 0.25) * s
                     q = _cbez(tip, tip + dd * Lt * 0.4, tip + dd * Lt * 0.75, tip + dd * Lt, 6)
                     self.wood.append(dict(P=q, r=np.full(6, rmin * 0.8), z=z, d=depth + 1, vis=0.0, m=m))
-                    self.clusters.append(dict(x=float(q[-1, 0]), y=float(q[-1, 1]), R=float(Rb * rng.uniform(0.3, 0.5)),
+                    self.clusters.append(dict(x=float(q[-1, 0]), y=float(q[-1, 1]), R=float(Rb * rng.uniform(0.3, 0.5)), sm=sm,
                                               m=m, z=z + 0.1, front=True, spray=True))
 
     def _finish(self, rng):
+        self.clusters = [c for c in self.clusters if c['y'] > 0.62 * self.ht]
         cl = self.clusters
         X = np.array([c['x'] for c in cl])
         Y = np.array([c['y'] for c in cl])
@@ -196,6 +200,14 @@ class Tree14:
             dd = np.hypot(X[sel] - mx, (Y[sel] - my) * 1.3) + R[sel]
             mr = max(float(np.percentile(dd, 85)), float(R[sel].max()) * 1.3)
             self.masses[int(m)] = (float(mx), float(my), mr)
+        sms = np.array([c['sm'] for c in cl])
+        self.submasses = {}
+        for m in np.unique(sms):
+            sel = sms == m
+            w_ = R[sel] ** 2
+            mx, my = np.average(X[sel], weights=w_), np.average(Y[sel], weights=w_)
+            dd = np.hypot(X[sel] - mx, (Y[sel] - my) * 1.3) + R[sel]
+            self.submasses[int(m)] = (float(mx), float(my), max(float(np.percentile(dd, 85)), float(R[sel].max()) * 1.3))
         for c in cl:
             mx, my, mr = self.masses[int(c['m'])]
             dn = math.hypot(c['x'] - mx, (c['y'] - my) * 1.3) / mr
@@ -217,23 +229,41 @@ class Tree14:
 # ============================================================================ painter
 
 PAL14 = dict(
-    hot=(1.03, 0.95, 0.95), lit=(1.0, 0.82, 0.87), mid=(0.97, 0.66, 0.79), shade=(0.86, 0.6, 0.8),
-    deep=(0.68, 0.5, 0.76), trans=(1.02, 0.74, 0.68), core=(0.9, 0.52, 0.68), rim=(1.16, 1.02, 0.92),
-    wood=(0.13, 0.1, 0.16), wood_lit=(0.42, 0.31, 0.3), wood_rim=(1.0, 0.76, 0.56), wood_cool=(0.3, 0.3, 0.48),
+    hot=(1.03, 0.93, 0.94), lit=(1.0, 0.77, 0.84), mid=(0.95, 0.58, 0.72), shade=(0.83, 0.5, 0.68),
+    deep=(0.6, 0.4, 0.64), trans=(1.04, 0.72, 0.62), core=(0.9, 0.52, 0.68), rim=(1.16, 1.02, 0.92),
+    wood=(0.17, 0.13, 0.2), wood_lit=(0.38, 0.28, 0.28), wood_rim=(1.0, 0.74, 0.54), wood_cool=(0.3, 0.3, 0.48),
     lent=(0.3, 0.23, 0.28))
 
 
-def _floret(x, y, r, ph, kind):
-    n = 10 if r < 3 else (20 if r < 8 else 30)
+# far bank: softer aerial pinks, lifted shadows (less value range, cooler)
+PAL14_FAR = dict(hot=(1.02, 0.93, 0.95), lit=(0.99, 0.8, 0.87), mid=(0.95, 0.66, 0.8), shade=(0.84, 0.62, 0.82),
+                 deep=(0.72, 0.56, 0.8), rim=(1.08, 0.98, 0.94))
+
+
+def _floret_shape(ph, kind, n):
     th = np.linspace(0, 2 * math.pi, n, endpoint=False)
     if kind == 0:          # 5-petal blossom with notched petal tips
         c = np.abs(np.cos(2.5 * (th + ph)))
-        rr = r * (0.6 + 0.4 * c ** 0.45) * (1.0 - 0.1 * np.exp(-((th * 5 / (2 * math.pi) + ph * 5 / (2 * math.pi)) % 1.0 - 0.5) ** 2 / 0.002))
+        rr = (0.5 + 0.5 * c ** 0.55) * (1.0 - 0.1 * np.exp(-((th * 5 / (2 * math.pi) + ph * 5 / (2 * math.pi)) % 1.0 - 0.5) ** 2 / 0.002))
     elif kind == 1:        # lumpy bunch body
-        rr = r * (0.8 + 0.1 * np.cos(3 * th + ph) + 0.07 * np.cos(5 * th + 2 * ph) + 0.05 * np.cos(7 * th + 3 * ph))
+        rr = (0.8 + 0.1 * np.cos(3 * th + ph) + 0.07 * np.cos(5 * th + 2 * ph) + 0.05 * np.cos(7 * th + 3 * ph))
     else:
-        rr = r * (0.9 + 0.1 * np.cos(2 * th + ph))
-    return np.stack([x + rr * np.cos(th), y + rr * np.sin(th) * 0.92], 1)
+        rr = (0.9 + 0.1 * np.cos(2 * th + ph))
+    return np.stack([rr * np.cos(th), rr * np.sin(th) * 0.92], 1)
+
+
+_TPL = {}
+NPH = 24
+
+
+def _floret(x, y, r, ph, kind):
+    n = 10 if r < 2.5 else (25 if r < 8 else 35)
+    i = int(ph * NPH / 6.2832) % NPH
+    key = (kind, n, i)
+    t = _TPL.get(key)
+    if t is None:
+        t = _TPL[key] = _floret_shape(i * 6.2832 / NPH, kind, n)
+    return t * r + (x, y)
 
 
 class Painter14:
@@ -255,83 +285,109 @@ class Painter14:
         self.soft_px = soft_px
         self.p13 = R13.Painter13(k, sun_dir=tuple(L), wood_rim_px=wood_rim_px,
                                  pal={kk: p[kk] for kk in ('wood', 'wood_lit', 'wood_rim', 'wood_cool', 'lent')})
+        # wood behind the blossom (seen through the holes): cooler, lighter, lost in the crown's shade
+        self.p13b = R13.Painter13(k, sun_dir=tuple(L), wood_rim_px=wood_rim_px * 0.6,
+                                  pal=dict(wood=(0.3, 0.21, 0.32), wood_lit=(0.44, 0.31, 0.38), wood_rim=(0.8, 0.6, 0.58),
+                                           wood_cool=(0.4, 0.34, 0.52), lent=(0.34, 0.25, 0.34)))
 
-    def _col(self, c):
-        c = np.clip(np.asarray(c, np.float64) * SC8, 0, 255)
-        return (float(c[0]), float(c[1]), float(c[2]))
+    @staticmethod
+    def _col(c):
+        return (min(255.0, max(0.0, float(c[0]) * SC8)), min(255.0, max(0.0, float(c[1]) * SC8)),
+                min(255.0, max(0.0, float(c[2]) * SC8)))
 
     def _fill(self, rgb, a, pts, col):
         p = [np.round(np.asarray(pts) * 16).astype(np.int32)]
         cv2.fillPoly(rgb, p, self._col(col), cv2.LINE_AA, 4)
         cv2.fillPoly(a, p, 255, cv2.LINE_AA, 4)
 
+    def _cap(self, rgb, a, w, to_px, pw_):
+        """round joint at the end of a limb (where its thinner fork children continue): no blunt cut ends"""
+        rr = float(w['r'][-1]) * self.k
+        if rr < 1.2:
+            return
+        e = to_px(w['P'][-1:])[0]
+        c = pw_.pal['wood']
+        cv2.circle(rgb, (int(round(e[0] * 16)), int(round(e[1] * 16))), int(round(rr * 16)), self._col(c), -1,
+                   cv2.LINE_AA, 4)
+        cv2.circle(a, (int(round(e[0] * 16)), int(round(e[1] * 16))), int(round(rr * 16)), 255, -1, cv2.LINE_AA, 4)
+
     # ------------------------------------------------------------------ mass value fields
     def _fields(self, tree, to_px, W, H):
         q = 4
         Wl, Hl = W // q + 2, H // q + 2
         k = self.k
-        mids = sorted(tree.masses.keys())
-        cov = {}
-        for m in mids:
-            c = np.zeros((Hl, Wl), np.float32)
-            for cl in tree.clusters:
-                if cl['m'] != m:
-                    continue
-                x, y = to_px(np.array([[cl['x'], cl['y']]]))[0] / q
-                cv2.circle(c, (int(round(x * 4)), int(round(y * 4))), max(1, int(cl['R'] * k / q * 1.2 * 4)), 1.0, -1,
-                           cv2.LINE_AA, 2)
-            cov[m] = np.clip(c, 0, 1)
         Ls = self.Ls
         L3 = self.L3
         ys, xs = np.mgrid[0:Hl, 0:Wl].astype(np.float32)
-        V, TR = {}, {}
-        # sun rank of each mass (projection of its centre toward the sun)
-        cen = {m: to_px(np.array([[tree.masses[m][0], tree.masses[m][1]]]))[0] / q for m in mids}
-        rank = {m: float(cen[m] @ Ls) for m in mids}
-        for m in mids:
-            mx, my, mr = tree.masses[m]
-            mrp = mr * k / q
+
+        def covs(key):
+            out = {}
+            for cl in tree.clusters:
+                c = out.get(cl[key])
+                if c is None:
+                    c = out[cl[key]] = np.zeros((Hl, Wl), np.float32)
+                x, y = to_px(np.array([[cl['x'], cl['y']]]))[0] / q
+                cv2.circle(c, (int(round(x * 4)), int(round(y * 4))), max(1, int(cl['R'] * k / q * 1.2 * 4)), 1.0, -1,
+                           cv2.LINE_AA, 2)
+            return {kk: np.clip(v, 0, 1) for kk, v in out.items()}
+
+        def field(cov, cen, mrp, occ=None):
             sig = max(1.0, 0.3 * mrp)
-            h = cv2.GaussianBlur(cov[m], (0, 0), sig)
+            h = cv2.GaussianBlur(cov, (0, 0), sig)
             h = h / max(h.max(), 1e-3)
             gx = cv2.Sobel(h, cv2.CV_32F, 1, 0, ksize=3) / 8.0
             gy = cv2.Sobel(h, cv2.CV_32F, 0, 1, ksize=3) / 8.0
             hs = mrp * 0.9
-            nx, ny, nz = -gx * hs, -gy * hs, np.ones_like(h)
-            nn = np.sqrt(nx * nx + ny * ny + nz * nz)
-            dif = (nx * L3[0] + ny * L3[1] + nz * L3[2]) / nn
-            cx, cy = cen[m]
-            pos = (cy - ys) / mrp                   # +1 at the top of the mass
+            nx, ny = -gx * hs, -gy * hs
+            nn = np.sqrt(nx * nx + ny * ny + 1.0)
+            dif = (nx * L3[0] + ny * L3[1] + L3[2]) / nn
+            pos = (cen[1] - ys) / mrp                   # +1 at the top of the mass
             v = 1.4 * (dif - 0.55) + 0.45 * pos
-            # cast shadow from the masses nearer the sun
-            occ = np.zeros_like(h)
-            for o in mids:
-                if o == m or rank[o] <= rank[m]:
-                    continue
-                occ = np.maximum(occ, cov[o])
-            if occ.any():
+            if occ is not None and occ.any():
                 d = 0.22 * mrp
                 M = np.float32([[1, 0, -Ls[0] * d], [0, 1, -Ls[1] * d]])
                 occ = cv2.warpAffine(occ, M, (Wl, Hl), borderMode=cv2.BORDER_CONSTANT)
                 occ = cv2.GaussianBlur(occ, (0, 0), max(0.7, 0.06 * mrp))
                 v = v - 0.75 * np.clip(occ, 0, 1)
-            V[m] = v.astype(np.float32)
-            # thin sun-facing edge (transmitted light)
             gn = np.sqrt(gx * gx + gy * gy) + 1e-6
             face = (-(gx * Ls[0] + gy * Ls[1]) / gn)
-            TR[m] = (np.clip(face, 0, 1) * np.clip((0.75 - h) / 0.5, 0, 1)).astype(np.float32)
+            tr = np.clip(face * 1.3, 0, 1) * np.clip((0.85 - h) / 0.5, 0, 1)
+            self._htot = np.maximum(self._htot, h)
+            return v.astype(np.float32), tr.astype(np.float32)
+
+        V, TR = {}, {}
+        self._htot = np.zeros((Hl, Wl), np.float32)
+        cm = covs('m')
+        cen = {m: to_px(np.array([[tree.masses[m][0], tree.masses[m][1]]]))[0] / q for m in cm}
+        rank = {m: float(cen[m] @ Ls) for m in cm}
+        for m in cm:
+            occ = np.zeros((Hl, Wl), np.float32)
+            for o in cm:
+                if o != m and rank[o] > rank[m]:
+                    occ = np.maximum(occ, cm[o])
+            V[('m', m)], TR[('m', m)] = field(cm[m], cen[m], tree.masses[m][2] * k / q, occ)
+        cs = covs('sm')
+        for m in cs:
+            c_ = to_px(np.array([[tree.submasses[m][0], tree.submasses[m][1]]]))[0] / q
+            V[('s', m)], TR[('s', m)] = field(cs[m], c_, tree.submasses[m][2] * k / q)
         self._q = q
         return V, TR
 
     @staticmethod
     def _samp(F, x, y):
+        if isinstance(F, tuple):
+            A, B = F
+            h, w = A.shape
+            xi = min(max(int(x + 0.5), 0), w - 1)
+            yi = min(max(int(y + 0.5), 0), h - 1)
+            return 0.55 * float(A[yi, xi]) + 0.6 * float(B[yi, xi]) + 0.05
         h, w = F.shape
-        xi = min(max(int(round(x)), 0), w - 1)
-        yi = min(max(int(round(y)), 0), h - 1)
+        xi = min(max(int(x + 0.5), 0), w - 1)
+        yi = min(max(int(y + 0.5), 0), h - 1)
         return float(F[yi, xi])
 
     def _band(self, v):
-        if v > 0.5:
+        if v > 0.62:
             return 4
         if v > 0.12:
             return 3
@@ -345,10 +401,13 @@ class Painter14:
         pal = self.pal
         cols = (pal['deep'], pal['shade'], pal['mid'], pal['lit'], pal['hot'])
         c = cols[b]
-        if b <= 2 and tr > 0.35:
+        # warm transmitted light where the sun shines through the thin sun-side edges
+        if b <= 2 and tr > 0.25:
             c = c * 0.35 + pal['trans'] * 0.65
-        elif b <= 1 and tr > 0.15:
-            c = c * 0.6 + pal['trans'] * 0.4
+        elif b <= 2 and tr > 0.1:
+            c = c * 0.65 + pal['trans'] * 0.35
+        elif b == 3 and tr > 0.3:
+            c = c * 0.7 + pal['trans'] * 0.3
         return c * (1.0 + rng.normal(0, 0.012))
 
     # ------------------------------------------------------------------ one sub-cluster
@@ -357,7 +416,10 @@ class Painter14:
         q = self._q
         cx, cy = to_px(np.array([[c['x'], c['y']]]))[0]
         R = c['R'] * k
-        Vm, Tm = V[c['m']], TR[c['m']]
+        Vm_, Vs_ = V[('m', c['m'])], V[('s', c['sm'])]
+        Tm_ = TR[('m', c['m'])]
+        Vm = (Vm_, Vs_)
+        Tm = Tm_
         fr = c.get('fr', 0.0)
         fl = self.fl * rng.uniform(0.9, 1.1)
         if R < 1.6 * fl:
@@ -374,6 +436,8 @@ class Painter14:
             if rng.random() < 0.3 * fr:
                 continue                              # lacy outer edge: missing bunches -> small holes
             bunches.append((bx, by, rb))
+        if c.get('cover'):
+            bunches.append((cx, cy, R * 0.8))       # always over the point where the limb goes in
         bunches.sort(key=lambda b: -b[1])            # bottom first: lit tops overlap the undersides
         pal = self.pal
         for bx, by, rb in bunches:
@@ -386,7 +450,7 @@ class Painter14:
                 self._fill(rgb, a, _floret(bx, by + 0.1 * rb, rb * 0.78, rng.uniform(0, 6), 1),
                            self._color(b, t0, rng))
             # 2) florets (medium), painted bottom-up
-            nf = int(np.clip((rb / fl) ** 2 * (0.9 if not loose else 0.45) * self.detail, 2, 26))
+            nf = int(np.clip((rb / fl) ** 2 * (1.1 if not loose else 0.45) * self.detail, 2, 26))
             rr = rb * np.sqrt(rng.uniform(0.15, 1.0, nf))
             aa = rng.uniform(0, 2 * math.pi, nf)
             fx = bx + rr * np.cos(aa)
@@ -395,7 +459,7 @@ class Painter14:
             for i in order:
                 rf = fl * rng.uniform(0.8, 1.2)
                 local = (by - fy[i]) / max(rb, 1.0)           # up within the bunch
-                v = self._samp(Vm, fx[i] / q, fy[i] / q) + 0.14 * local + rng.normal(0, 0.035)
+                v = self._samp(Vm, fx[i] / q, fy[i] / q) + 0.1 * local + rng.normal(0, 0.015)
                 b = self._band(v)
                 col = self._color(b, self._samp(Tm, fx[i] / q, fy[i] / q), rng)
                 self._fill(rgb, a, _floret(fx[i], fy[i], rf, rng.uniform(0, 6), 0 if rf > 2.5 else 2), col)
@@ -440,7 +504,11 @@ class Painter14:
         for w in sorted(tree.wood, key=lambda w: -w['d']):
             if w['d'] == 0:
                 continue
-            self.p13._wood(rgb, a, w, to_px, rng)
+            pw_ = self.p13 if w['d'] <= 2 else self.p13b
+            pw_._wood(rgb, a, w, to_px, rng)
+            self._cap(rgb, a, w, to_px, pw_)
+        back_a = a
+        a = np.zeros_like(back_a)            # coverage of everything painted after the back wood
         # 2) back sub-clusters, then the visible wood prefixes + trunk, then the front sub-clusters
         items = []
         for i, c in enumerate(tree.clusters):
@@ -450,24 +518,44 @@ class Painter14:
             if w['d'] == 0:
                 items.append((-0.3, 0, i))
             elif w['vis'] > 0.02:
-                items.append((tree.mz.get(w['m'], 0.0) * 3.0 - 0.05 * w['d'], 0, i))
-        items.sort(key=lambda q_: (q_[0], q_[1]))
+                # visible limb prefixes over the blossom (connected to the trunk), thick first ...
+                items.append((50.0 - w['d'], 0, i))     # thin first: child bases tuck under the parent
+                # ... and a blossom clump painted over the point where each limb goes into the crown
+                n = len(w['P'])
+                j = max(1, int(math.ceil(w['vis'] * (n - 1))))
+                Rm = np.median([c['R'] for c in tree.clusters if c['m'] == w['m']] or [0.25 * tree.s])
+                if w['vis'] < 0.999 or w['d'] == tree.maxd:
+                    seg = np.linalg.norm(np.diff(w['P'][:j + 1], axis=0), axis=1)
+                    jb = max(0, j - int(np.searchsorted(np.cumsum(seg[::-1]), 0.25 * Rm)))
+                    cov_ = dict(x=float(w['P'][jb, 0]), y=float(w['P'][jb, 1]), R=float(Rm * rng.uniform(0.85, 1.05)),
+                                m=w['m'], sm=w.get('sm', 0), z=0.0, front=True, fr=0.2, cover=True)
+                    if w['sm'] not in tree.submasses:
+                        cov_['sm'] = min(tree.submasses, key=lambda q_: abs(q_ - w['sm']))
+                    items.append((60.0 + rng.uniform(0, 1), 2, cov_))
+        items.sort(key=lambda q_: (q_[0], q_[1] if q_[1] < 2 else 2))
         for zc, kind, i in items:
             if kind == 0:
                 w = tree.wood[i]
                 if w['d'] > 0:
                     n = len(w['P'])
-                    j = max(2, int(math.ceil(w['vis'] * (n - 1))) + 1)
-                    w = dict(w, P=w['P'][:j], r=w['r'][:j])
+                    jc = max(1, int(math.ceil(w['vis'] * (n - 1))))
+                    j = max(2, jc + 1)
+                    rr_ = w['r'][:j].copy()
+                    nt = max(2, int(j * 0.3))
+                    rr_[-nt:] *= np.linspace(1.0, 0.4, nt) ** 0.8     # taper into the blossom, no butt end
+                    w = dict(w, P=w['P'][:j], r=rr_)
                 self.p13._wood(rgb, a, w, to_px, rng)
                 P = to_px(w['P'])
                 rr = max(1, int(round(2 * float(np.mean(w['r'])) * k)))
                 cv2.polylines(wm, [np.round(P * 16).astype(np.int32)], False, 255, rr, cv2.LINE_8, 4)
             else:
-                c = tree.clusters[i]
+                c = tree.clusters[i] if kind == 1 else i
+                if ('s', c['sm']) not in V:
+                    continue
                 self._cluster(rgb, a, c, to_px, rng, V, TR)
                 cx, cy = to_px(np.array([[c['x'], c['y']]]))[0]
                 cv2.circle(wm, (int(cx), int(cy)), int(c['R'] * k * 0.9), 0, -1)
+        a = np.maximum(a, back_a)
         A = a.astype(np.float32) / 255.0
         C = rgb.astype(np.float32) / SC8
         # crisp warm rim on the sun-facing silhouette

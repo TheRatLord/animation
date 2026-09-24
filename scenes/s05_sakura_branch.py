@@ -66,9 +66,9 @@ def build(W, H, seed=7):
         c = np.asarray(c, np.float64)
         for i in range(n):
             a = rng.uniform(-1.2, 1.2) + math.atan2(out_dir[1], out_dir[0])
-            dist = Rf * rng.uniform(0.3, 1.35) * (1.0 + 0.08 * n)
+            dist = Rf * rng.uniform(0.15, 1.05) * (1.0 + 0.045 * n)
             q = c + np.array([math.cos(a), math.sin(a)]) * dist
-            R = Rf * rng.uniform(0.85, 1.15)
+            R = Rf * rng.uniform(0.7, 1.2)
             kind = 0
             if rng.random() < 0.18:
                 kind = 2       # seen from the back / side: lilac, less structure
@@ -92,7 +92,7 @@ def build(W, H, seed=7):
     for k, nd in enumerate(nodes[:-1]):
         dpar = dirs[min(k + 1, len(dirs) - 1)]
         rpar = rr[2 * (k + 1)]
-        ntw = 2 if k >= 1 else 1
+        ntw = 3 if k >= 1 else 2
         for j in range(ntw):
             side = -side
             ang = math.radians(rng.uniform(30, 45)) * side
@@ -103,25 +103,25 @@ def build(W, H, seed=7):
             tl = rng.uniform(0.045, 0.085) * W * (1.0 - 0.1 * k)
             tp, trr, tdirs = limb(base, dt, 2, tl * 0.55, rpar * 0.55, 1.2 * u, 1, -side)
             tip = tp[-1]
-            cluster(tip + tdirs[-1] * Rf * 0.6, int(rng.integers(7, 12)), Rf, tdirs[-1], 1.0)
+            cluster(tip + tdirs[-1] * Rf * 0.6, int(rng.integers(11, 17)), Rf, tdirs[-1], 1.0)
             if rng.random() < 0.6:
-                cluster(tp[2], int(rng.integers(3, 6)), Rf * 0.9, _rot(tdirs[0], 1.5 * side), 0.8)
+                cluster(tp[2], int(rng.integers(5, 9)), Rf * 0.9, _rot(tdirs[0], 1.5 * side), 0.8)
             # secondary fork near the twig's middle
             if rng.random() < 0.75:
                 ang2 = math.radians(rng.uniform(30, 45)) * (-side)
                 d2 = _rot(tdirs[0], ang2)
                 b2 = tp[2]
                 sp, srr, sdirs = limb(b2, d2, 1, tl * rng.uniform(0.35, 0.55), trr[2] * 0.7, 1.0 * u, 2, side)
-                cluster(sp[-1] + sdirs[-1] * Rf * 0.5, int(rng.integers(6, 10)), Rf * 0.95, sdirs[-1], 0.5)
+                cluster(sp[-1] + sdirs[-1] * Rf * 0.5, int(rng.integers(8, 13)), Rf * 0.95, sdirs[-1], 0.5)
     # spur clusters directly on the limb (hide the wood in places)
     for k in range(1, len(pts) - 1):
-        if k < 5 or rng.random() > 0.7:
+        if k < 3 or rng.random() > 0.65:
             continue
         nd = pts[k]
         off = _rot(dirs[min(k // 2, len(dirs) - 1)], math.pi / 2 * (1 if rng.random() < 0.6 else -1))
-        cluster(nd + off * Rf * 0.5, int(rng.integers(5, 10)), Rf * 1.05, off, 2.0)
+        cluster(nd + off * Rf * 0.5, int(rng.integers(7, 12)), Rf * 1.05, off, 2.0)
     # terminal cluster
-    cluster(pts[-1] + dirs[-1] * Rf * 0.7, 11, Rf * 1.05, dirs[-1], 2.5)
+    cluster(pts[-1] + dirs[-1] * Rf * 0.7, 17, Rf * 1.05, dirs[-1], 2.5)
     return B
 
 

@@ -12,9 +12,13 @@ def _ss(e0, e1, x):
 
 # (position along sun->centre axis, radius as frac of w, tint, shape, strength)
 CHAIN = [
-    (0.55, 0.008, (1.0, 0.8, 0.5), 'disc', 0.08),     # small amber
-    (1.0, 0.018, (0.7, 0.88, 1.0), 'hex', 0.025),     # very faint pale hex
-    (1.45, 0.012, (0.88, 0.75, 1.0), 'disc', 0.025),  # faint violet dot
+    (0.3, 0.006, (1.0, 0.85, 0.6), 'disc', 0.09),     # small amber
+    (0.55, 0.011, (1.0, 0.8, 0.5), 'hex', 0.06),      # amber hex
+    (0.8, 0.02, (0.7, 0.9, 1.0), 'hex', 0.035),       # pale cyan hex
+    (1.05, 0.009, (0.6, 1.0, 0.75), 'hex', 0.06),     # small green hex
+    (1.3, 0.03, (0.8, 0.75, 1.0), 'hex', 0.025),      # big faint violet hex
+    (1.55, 0.014, (1.0, 0.75, 0.9), 'disc', 0.04),    # pink dot
+    (1.8, 0.05, (0.75, 0.9, 1.0), 'ring', 0.03),      # large faint ring
 ]
 
 
@@ -50,10 +54,14 @@ def ghost_chain(w, h, lx, ly, cx, cy, amt=1.0, rot=0.3):
     return cv2.GaussianBlur(out, (0, 0), max(1.0, 0.003 * w))
 
 
-def anamorphic(w, h, lx, ly, amt=1.0, xs=None, ys=None):
+def anamorphic(w, h, lx, ly, amt=1.0, xs=None, ys=None, cx=None):
+    """Horizontal streak through the sun; with cx it reaches farther toward the frame centre side."""
     if xs is None:
         ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
     dx, dy = xs - lx, ys - ly
+    if cx is not None:
+        side = np.sign(cx - lx) if cx != lx else 1.0
+        dx = np.where(dx * side > 0, dx * 0.6, dx * 1.4)
     core = np.exp(-(dy / (0.0035 * h)) ** 2) * (np.exp(-np.abs(dx) / (0.3 * w)) * 0.7 + np.exp(-np.abs(dx) / (0.06 * w)))
     wide = np.exp(-(dy / (0.012 * h)) ** 2) * np.exp(-np.abs(dx) / (0.15 * w)) * 0.25
     return ((core + wide)[..., None] * np.array([0.62, 0.8, 1.0], np.float32) * 0.22 * amt).astype(np.float32)

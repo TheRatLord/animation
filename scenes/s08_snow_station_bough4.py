@@ -20,8 +20,8 @@ import cv2
 from s08_snow_station_bough3 import _poly_mask, _smooth, _sstep, _over, _ip, PAL
 
 
-SNOW_TOP = np.array([0.66, 0.74, 1.02], np.float32)      # sky-lit top plane
-SNOW_FACE = np.array([0.34, 0.35, 0.66], np.float32)      # blue-violet shadow face (bounce-lit)
+SNOW_TOP = np.array([0.8, 0.85, 1.04], np.float32)      # sky-lit top plane
+SNOW_FACE = np.array([0.36, 0.38, 0.68], np.float32)      # blue-violet shadow face (bounce-lit)
 SNOW_BELLY = np.array([0.17, 0.16, 0.42], np.float32)    # deep violet underside
 RIM = np.array([0.86, 0.94, 1.2], np.float32)
 AMBER = np.array([1.0, 0.68, 0.34], np.float32)
@@ -114,7 +114,7 @@ def bough_fir(W, H, trunk_u, top_v, base_v, reach, s, seed=0, lamps=(), fog=(0.2
     if w2 > 0 and h2 > 0:
         m = _poly_mask([poly], X0, Y0, w2, h2, ss=2)
         m = cv2.GaussianBlur(m, (0, 0), 6.0 * s + 0.3)
-        col = (PAL['NEED_LO'] * 0.55 + fog * 0.08) * (1 + 0.25 * st[Y0:Y0 + h2, X0:X0 + w2, None])
+        col = (PAL['NEED_LO'] * 0.55 + fog * 0.08) * (1 + 0.06 * st[Y0:Y0 + h2, X0:X0 + w2, None])
         _over(rgb, a, X0, Y0, m * 0.96, col.astype(np.float32))
 
     # ---- trunk
@@ -181,6 +181,7 @@ def bough_fir(W, H, trunk_u, top_v, base_v, reach, s, seed=0, lamps=(), fog=(0.2
             if va - 0.3 * Lb < v0 < vb:
                 Lb = min(Lb, max((xm - u0) / 0.92, 8 * s))
         geo[id(it)] = _Bough(u0, v0, Lb, s, np.random.default_rng(sd), kind, dirn)
+        geo[id(it)].lamps = lamps
 
     # bridges: a main bough's load spills down onto the next 1-2 tiers near the trunk
     mains = [it for it in items if it[6] == 'main' and id(it) in geo]
@@ -271,14 +272,39 @@ def _paint_needles(rgb, a, g, rng, st, lamp_light, fog, haze, W, H):
     ycx = _ip(xx[0], x, y)[None, :]
     Tx = _ip(xx[0], x, T)[None, :]
     rel = (yy - ycx) / np.maximum(Tx, 1e-3)
-    shade = np.clip((rel + 0.4) / 1.4, 0, 1)[..., None]
-    fol = NEED_HI * (1 - shade) ** 2 + NEED * (1 - (1 - shade) ** 2)
-    und = np.clip((rel - 0.4) / 0.9, 0, 1)[..., None]
-    fol = fol * (1 - und) + NEED_LO * 1.15 * und
-    fol = fol * (1 + 0.35 * st[Y0:Y1, X0:X1, None])
-    fol = fol * (1 + 0.55 * light[..., None] * (1.2 - shade)) * (1 - 0.35 * dark[..., None])
+    # painted tier MASS (round 5): one dark blue-green silhouette value per bough, a flat cool moonlit
+    # plane on the upper surface split by a soft-but-readable step, a slightly bluer underside value.
+    # Needle strokes only break the SILHOUETTE; inside the mass the texture is suppressed.
+    MASS = np.array([0.03, 0.075, 0.1], np.float32)
+    MOON = np.array([0.08, 0.16, 0.23], np.float32)
+    UNDER = np.array([0.035, 0.06, 0.12], np.float32)
+    jag = 0.12 * np.sin(xx * 0.11 / s + x[0]) + 0.08 * np.sin(xx * 0.29 / s + y[0])
+    topk = _sstep(0.05, -0.12, rel + jag)[..., None]
+    undk = _sstep(0.55, 0.8, rel - jag)[..., None]
+    fol = MASS * (1 - topk) + MOON * topk
+    fol = fol * (1 - undk) + UNDER * undk
+    core = cv2.GaussianBlur(m, (0, 0), 2.5 * s + 0.5)
+    core = _sstep(0.82, 0.97, core)
+    edge = np.clip(m - core, 0, 1)[..., None]            # silhouette zone only
+    fol = fol * (1 + 0.05 * st[Y0:Y1, X0:X1, None])
+    fol = fol * (1 + edge * (0.45 * light[..., None] * (1 - undk) - 0.3 * dark[..., None]))
     E = lamp_light(xx, yy)
-    fol = fol + E * np.array([0.24, 0.15, 0.07], np.float32) * (1 - shade) * 0.55
+    fol = fol + E * np.array([0.2, 0.12, 0.05], np.float32) * topk * 0.35
+    # warm lamp-side rim: only the silhouette pixels whose outward normal faces a lamp
+    mb = cv2.GaussianBlur(m, (0, 0), 4.5 * s + 0.5)
+    gx = cv2.Sobel(mb, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(mb, cv2.CV_32F, 0, 1, ksize=3)
+    gn = np.sqrt(gx * gx + gy * gy) + 1e-6
+    ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (max(int(2.2 * s) * 2 + 1, 3),) * 2)
+    band = np.clip(m - cv2.erode(m, ker), 0, 1) * _sstep(0.25, 0.5, mb)
+    rimw = np.zeros((h, w), np.float32)
+    for (lu, lv, lc, lr, lk) in getattr(g, 'lamps', ()):
+        dx, dy = lu - xx, lv - yy
+        dd = np.sqrt(dx * dx + dy * dy) + 1e-3
+        face_ = np.clip((-gx * dx - gy * dy) / (gn * dd), 0, 1)
+        rimw += face_ ** 1.5 * lk * np.exp(-(dd / (lr * 1.1)) ** 2)
+    rimw = np.clip(rimw * 2.2, 0, 1) * band
+    fol = fol * (1 - rimw[..., None] * 0.55) + np.array([0.7, 0.42, 0.17], np.float32) * rimw[..., None] * 0.55
     fol = fol * (1 - haze) + fog * 0.36 * haze
     _over(rgb, a, X0, Y0, m, fol.astype(np.float32))
     g.E = E
@@ -327,6 +353,7 @@ def _paint_snow(rgb, a, g, rng, st, lamp_light, fog, haze, W, H, tier):
     sm_all = np.zeros((h, w), np.float32)
     col_all = np.zeros((h, w, 3), np.float32)
     rim_all = np.zeros((h, w), np.float32)
+    face_all = np.zeros((h, w), np.float32)
     top_full = np.full(n, np.nan)
     bot_full = np.full(n, np.nan)
     for (ta, tb, big) in segs:
@@ -336,18 +363,30 @@ def _paint_snow(rgb, a, g, rng, st, lamp_light, fog, haze, W, H, tier):
         tt = (t[sel] - ta) / max(tb - ta, 1e-3)
         xs_, yus, Ts = x[sel], yu[sel], T[sel]
         # thickness: an irregular swell (not a pill): envelope with steep-ish ends + random bumps
-        env = np.sin(np.pi * np.clip(tt, 0, 1)) ** rng.uniform(0.3, 0.6)
-        prof = env * (0.55 + _bumps(rng, 0, tt, 2, 4, 0.08, 0.3, 0.2, 0.7))
+        # (cycle 7) a thin SLAB lying along the bough: steep squared ends, near-constant thickness,
+        # only small irregular steps - no dome / cushion swell
+        env = np.clip(np.sin(np.pi * np.clip(tt, 0, 1)) * 3.0, 0, 1) ** 0.6
+        prof = env * (0.8 + 0.5 * _bumps(rng, 0, tt, 2, 4, 0.05, 0.15, 0.2, 0.7))
         prof = prof * (1 - 0.45 * t[sel])                      # thinner toward the tip
         prof = prof + 0.05 * np.sin(tt * rng.uniform(25, 45) + rng.uniform(0, 6)) * env
         prof = _smooth(np.clip(prof, 0, None), 2)
         prof = prof / max(prof.max(), 1e-3)
-        Sk = Smax * big * (1 - 0.3 * t[sel].mean()) * float(np.clip((tb - ta) / 0.35, 0.3, 1.0))
+        Sk = 0.62 * Smax * big * (1 - 0.3 * t[sel].mean()) * float(np.clip((tb - ta) / 0.35, 0.3, 1.0))
         top = yus - Sk * prof * 1.05 + Ts * 0.15
+        # crisp, slightly jagged hand-cut top edge (small irregular notches, not a smooth roll)
+        zz = rng.uniform(-1, 1, len(tt))
+        zz = np.convolve(zz, np.ones(3) / 3, mode='same')
+        top = top + zz * 1.3 * s * env
         # bottom follows the bough's upper edge, slumping a little over the front in a few lobes
         slump = _bumps(rng, 0, tt, 1, 4, 0.03, 0.1, 0.2, 0.9)
-        bot = yus + Ts * (0.28 + 0.1 * rng.random()) * env ** 0.5 + Sk * 0.35 * np.clip(slump, 0, 1.2) * env + 0.5 * s
-        bot = np.maximum(bot, top + 1.2 * s)
+        bot = yus + Ts * (0.2 + 0.08 * rng.random()) * env ** 0.5 + Sk * 0.2 * np.clip(slump, 0, 1.2) * env + 0.5 * s
+        # hard, slightly ragged underside: small chipped steps + a few short drips (not a smooth roll)
+        rg = rng.uniform(-1, 1, len(tt))
+        rg = np.convolve(rg, np.ones(2) / 2, mode='same')
+        drip = (rng.random(len(tt)) < 0.04).astype(np.float64)
+        drip = np.convolve(drip, np.ones(3), mode='same') * rng.uniform(1.5, 3.5) * s
+        bot = bot + rg * 1.1 * s * env + drip * env
+        bot = np.maximum(bot, top + 1.6 * s)
         top_full[sel] = top
         bot_full[sel] = bot
         poly = np.concatenate([np.stack([xs_, top], 1), np.stack([xs_[::-1], bot[::-1]], 1)])
@@ -357,22 +396,21 @@ def _paint_snow(rgb, a, g, rng, st, lamp_light, fog, haze, W, H, tier):
         rv = np.clip((yy - ttop) / np.maximum(tbot - ttop, 1e-3), 0, 1)
         ts_ = rng.uniform(0.38, 0.6) if mode != 'dust' else 0.6
         jag = 0.08 * np.sin(xx * (0.08 / s) + rng.uniform(0, 6)) + 0.04 * np.sin(xx * (0.23 / s) + rng.uniform(0, 6))
-        step = np.clip((rv - ts_ - jag) / 0.07, 0, 1)
-        step = (step * step * (3 - 2 * step))[..., None]
-        lit = SNOW_TOP * rng.uniform(0.92, 1.05)
-        lit = lit * (1 - warmk) + (SNOW_TOP * 0.55 + AMBER * 0.75 * np.clip(Eh * 1.4, 0, 1.2)) * warmk
-        face = SNOW_FACE * rng.uniform(0.9, 1.08) + Eh * AMBER * 0.18
-        col = lit * (1 - step) + face * step
-        dd = np.clip((rv - 0.72) / 0.28, 0, 1)[..., None]
-        col = col * (1 - dd) + SNOW_BELLY * dd
-        # soft lit crown just under the top edge, brush texture
-        col = col + (lit * 0.18) * np.clip(1 - rv / 0.18, 0, 1)[..., None]
-        col = col * (1 + 0.04 * st[Y0:Y1, X0:X1, None])
+        # painted, not modelled: ONE flat pale lit plane over ONE flat cool shadow value, split by a
+        # crisp hand-drawn (slightly jagged) edge - no bevel gradient, no belly darkening, no crown glow
+        # (cycle 7) ONE flat pale-blue plane for the whole slab; the light is carried only by a crisp
+        # 2-3 px warm-white top edge (drawn below as the rim), no internal gradient or value split
+        body = SNOW_TOP * 0.56 + SNOW_FACE * 0.44
+        body = body * rng.uniform(0.97, 1.02) + Eh * AMBER * 0.1
+        step = np.zeros(rv.shape + (1,), np.float32)
+        col = body * np.ones_like(rv)[..., None]
+        col = col * (1 + 0.012 * st[Y0:Y1, X0:X1, None])
         col_all = col_all * (1 - m[..., None]) + col * m[..., None]
+        face_all = np.maximum(face_all * (1 - m), step[..., 0] * m)
         sm_all = np.maximum(sm_all, m)
         rm = np.zeros((h * 3, w * 3), np.uint8)
-        q = ((np.stack([xs_, top + 0.6 * s], 1) - [X0, Y0]) * 3).astype(np.int32)
-        cv2.polylines(rm, [q], False, 255, max(int(round(1.2 * s * 3 * 0.5)), 2), cv2.LINE_AA)
+        q = ((np.stack([xs_, top + 1.1 * s], 1) - [X0, Y0]) * 3).astype(np.int32)
+        cv2.polylines(rm, [q], False, 255, max(int(round(2.4 * s * 3)), 3), cv2.LINE_AA)
         rim_all = np.maximum(rim_all, cv2.resize(rm.astype(np.float32) / 255, (w, h), interpolation=cv2.INTER_AREA) * m)
     g.snow_top = top_full
     if sm_all.max() <= 0:
@@ -380,18 +418,7 @@ def _paint_snow(rgb, a, g, rng, st, lamp_light, fog, haze, W, H, tier):
     # darker needle-mass shadow under each load: the snow shades the needles right beneath it
     # (a soft cool-dark band hugging the load's lower edge, strongest near the trunk), painted onto the
     # existing needles only, so every tier separates from the one below it as depth
-    ok = ~np.isnan(bot_full)
-    if ok.sum() > 4:
-        sb = np.where(ok, bot_full, -1e4)
-        bpx = _ip(xx[0], x[ok], sb[ok])[None, :]
-        have = ((xx >= x[ok].min()) & (xx <= x[ok].max())) if dirn > 0 else ((xx <= x[ok].max()) & (xx >= x[ok].min()))
-        Tx = _ip(xx[0], x, T)[None, :]
-        dsh = (yy - bpx) / np.maximum(Tx * 0.9, 2 * s)
-        shm = np.exp(-np.clip(dsh, 0, None) * 2.2) * np.clip(dsh * 6 + 1.0, 0, 1) * have
-        shm = cv2.GaussianBlur(shm.astype(np.float32), (0, 0), 1.2 * s + 0.3) * (1 - sm_all)
-        al = a[Y0:Y1, X0:X1]
-        k_ = np.clip(shm * al * (0.62 - 0.4 * haze), 0, 0.8)[..., None]
-        rgb[Y0:Y1, X0:X1] = rgb[Y0:Y1, X0:X1] * (1 - k_) + (PAL['NEED_LO'] * 0.35 + np.array([0.0, 0.004, 0.02], np.float32)) * al[..., None] * k_
+    # (round 5) no AO/contact darkening under the loads: the snow's lower edge is lost into the needles
     # falling-powder puffs: a few soft translucent wisps shed from the load's lower edge / tip
     if haze < 0.2 and rng.random() < 0.55:
         pm = np.zeros((h, w), np.float32)
@@ -412,6 +439,8 @@ def _paint_snow(rgb, a, g, rng, st, lamp_light, fog, haze, W, H, tier):
     tf = 1.0 - 0.1 * min(tier / 14.0, 1.0)
     col_all = col_all * tf
     col_all = col_all * (1 - haze * 0.65) + fog * 1.15 * haze * 0.65
+    # lost lower edge: the shadow face dissolves into the needle mass (the lit top edge stays crisp)
+    # (cycle 7) hard ragged underside instead: keep the anti-aliased polygon edge as painted
     _over(rgb, a, X0, Y0, sm_all, col_all.astype(np.float32))
     # needle tips breaking the snow edges: dark strokes hanging over the lower edge, a few poking up
     segs2 = []
@@ -438,8 +467,8 @@ def _paint_snow(rgb, a, g, rng, st, lamp_light, fog, haze, W, H, tier):
         pm = _strokes_mask(segs2, X0, Y0, w, h, ss=3)
         ncol = (PAL['NEED'] * 1.1 + E * np.array([0.1, 0.06, 0.03], np.float32)) * (1 - haze) + fog * 0.36 * haze
         _over(rgb, a, X0, Y0, pm * 0.95, ncol.astype(np.float32))
-    rim_c = RIM * (1 - warmk) + (RIM * 0.5 + AMBER * 1.1) * warmk
-    _over(rgb, a, X0, Y0, rim_all * (0.75 - 0.45 * haze), rim_c.astype(np.float32))
+    rim_c = np.array([1.08, 1.04, 1.02], np.float32) * (1 - warmk) + (np.array([0.75, 0.7, 0.66], np.float32) + AMBER * 0.75) * warmk
+    _over(rgb, a, X0, Y0, rim_all * (0.95 - 0.55 * haze), rim_c.astype(np.float32))
     # a few stable ice glints on the lit tops (static: part of the painted plate)
     grng = np.random.default_rng(int(g.x[0] * 13 + g.y[0] * 7) & 0x7fffffff)
     ys_, xs2 = np.nonzero((rim_all > 0.5) & (grng.random(rim_all.shape) < 0.01))
@@ -496,10 +525,9 @@ def _paint_bridge(rgb, a, g, lows, rng, st, lamp_light, W, H):
     # uneven drape: a lit ledge where it rests on the bough in between, slump strokes, darker foot
     lv = rng.uniform(0.35, 0.6)
     ledge = np.exp(-((rv - lv - 0.05 * np.sin(xx * 0.06 / s)) / 0.06) ** 2)
-    face = SNOW_FACE * (1.2 - 0.5 * rv[..., None]) * (1 + 0.12 * vst[..., None]) + Eh * AMBER * 0.15
-    face = face + ledge[..., None] * (SNOW_TOP * 0.35)
+    face = SNOW_FACE * 0.8 * (1 + 0.02 * vst[..., None]) + Eh * AMBER * 0.12
+    cap = (cap > 0.5).astype(np.float32)
     col = lit * cap[..., None] + face * (1 - cap[..., None])
-    col = col * (1 - 0.4 * np.clip((rv[..., None] - 0.75) / 0.25, 0, 1)) + SNOW_BELLY * 0.4 * np.clip((rv[..., None] - 0.75) / 0.25, 0, 1)
     _over(rgb, a, X0, Y0, m, col.astype(np.float32))
     rm = np.zeros((h * 3, w * 3), np.uint8)
     qq = ((np.stack([xs, top + 0.6 * s], 1) - [X0, Y0]) * 3).astype(np.int32)

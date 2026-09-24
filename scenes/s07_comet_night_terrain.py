@@ -328,9 +328,9 @@ def _ss(a, b, x):
 
 
 def shade(X, Z, fields, pal, light_x, light_y, Wp, H, f, s, yH, y_off, ss, aerial_col, fog_d=30.0,
-          rim_col=(0.72, 0.93, 1.0), rim_amt=1.0, snow_lo=0.42, soft=0.0, tl=0.28, seed=0):
+          rim_col=(0.72, 0.93, 1.0), rim_amt=1.0, snow_lo=0.42, soft=0.0, tl=0.28, seed=0, light_dir=None):
     """Paint one depth plate. Returns straight RGBA at plate resolution (area-downsampled from ss)."""
-    hm, nxg, nyg, nzg, fl, cv_, crest, n1, n2, ffg, n3g, lfg = fields
+    hm, nxg, nyg, nzg, fl, cv_, crest, n1, n2, ffg, n3g, lfg, nxbg, nybg, nzbg, flbg = fields
     valid = Z < 1e8
     Zs = np.where(valid, Z, 30.0).astype(np.float32)
     Xs = np.where(valid, X, 0.0).astype(np.float32)
@@ -350,15 +350,27 @@ def shade(X, Z, fields, pal, light_x, light_y, Wp, H, f, s, yH, y_off, ss, aeria
     ys_scr = np.broadcast_to(rows[:, None], (Hr, Wr))
 
     # ---- light: from the comet -> horizontal component points at it, up, a little behind the range
-    lxs = np.clip((light_x - xs_scr) / (0.28 * Wp), -1, 1)
+    if light_dir is None:
+        lxs = np.clip((light_x - xs_scr) / (0.28 * Wp), -1, 1)
+    else:
+        # one consistent key direction for the whole range (comet + tail sky: upper left)
+        lxs = np.full_like(xs_scr, float(light_dir))
     Lx, Ly, Lz = 0.9 * lxs, 0.35, 0.3
     ln = np.sqrt(Lx * Lx + Ly * Ly + Lz * Lz)
-    dif = (nx * Lx + ny * Ly + nz * Lz) / ln
+    dif_f = (nx * Lx + ny * Ly + nz * Lz) / ln
+    nxb = _sample(nxbg, Xs, Zs)
+    nyb = _sample(nybg, Xs, Zs)
+    nzb = _sample(nzbg, Xs, Zs)
+    dif_b = (nxb * Lx + nyb * Ly + nzb * Lz) / ln
+    # broad planes everywhere, the fine facet normals only near the crests
+    hrel0 = h / np.maximum(_sample(crest, Xs, Zs) * RES * Zs, 0.05)
+    crest_w = _ss(0.72, 0.95, hrel0) if light_dir is not None else np.ones_like(hrel0)
+    dif = dif_b + (dif_f - dif_b) * (0.25 + 0.75 * crest_w)
     # fine fluting: the small rills / ribs down the fall line catch and lose the light
     ffn = _sample(ffg, Xs, Zs)
     nf = _sample(n3g, Xs, Zs)
     flute = np.clip(ffn, -1.2, 1.2) * np.sign(lxs + 1e-3) * -0.5
-    dif = dif + 0.16 * flute * _ss(0.05, 0.3, 1 - ny)
+    dif = dif + 0.16 * flute * _ss(0.05, 0.3, 1 - ny) * (0.3 + 0.7 * crest_w)
     # painted: broad value steps with crisp transitions
     v = 0.5 * _ss(0.33, 0.37, dif) + 0.5 * _ss(0.6, 0.64, dif)
     v = 0.8 * v + 0.2 * np.clip(dif * 0.9 + 0.2, 0, 1)
@@ -367,14 +379,20 @@ def shade(X, Z, fields, pal, light_x, light_y, Wp, H, f, s, yH, y_off, ss, aeria
     # ---- snow: altitude (relative to the range crest), held in gullies, shed from steep ribs
     hrel = h / cr
     gul = np.clip(0.6 * flx + 0.5 * cur, -1.5, 1.5)             # >0 gully / couloir, <0 rib
+    if light_dir is not None:
+        # big painted shapes: gullies / ribs from the coarse channel field, fine ones only at the crest
+        flb0 = _sample(flbg, Xs, Zs)
+        gul = gul * (0.2 + 0.8 * crest_w) + np.clip(0.9 * flb0, -1.5, 1.5) * (0.8 - 0.6 * crest_w)
     # every peak gets its own gully character: some deeply fluted, some smooth wind-packed snow fields
     # with only a few couloirs (no single repeated stroke pattern across the range)
     xq = xs_scr / Wp
     pk_var = 0.5 + 0.5 * np.sin(xq * 23.0 + 1.3) * np.cos(xq * 9.0 + 0.4)
     gmod = 0.35 + 1.15 * _ss(0.2, 0.8, pk_var + 0.25 * (na - 0.5))
-    gul = gul * gmod + 0.35 * (nb - 0.5) * (1 - gmod * 0.6)
+    gul = gul * gmod + 0.35 * (nb - 0.5) * (1 - gmod * 0.6) * (1.0 if light_dir is None else 0.25 + 0.75 * crest_w)
     fln = np.clip(gul, 0, 1.2)
     steep = 1 - ny                                                # 0 flat .. 1 vertical
+    if light_dir is not None:
+        steep = (1 - nyb) + (ny - nyb) * -crest_w
     edge_w = 0.03 + 0.05 * soft
     sline = snow_lo + 0.14 * (na - 0.5)
     sn = (hrel - sline) + 0.3 * gul * _ss(0.1, 0.4, hrel) - 0.45 * _ss(0.3, 0.55, steep) * _ss(0.3, -0.2, gul) * _ss(0.92, 0.7, hrel) \
@@ -386,14 +404,28 @@ def shade(X, Z, fields, pal, light_x, light_y, Wp, H, f, s, yH, y_off, ss, aeria
             print(nm, np.percentile(a_[m], [5, 25, 50, 75, 95]).round(3))
             cv2.imwrite(os.environ['TDBG'] + f'_{nm}.png', cv2.resize(np.clip(a_ * m * 255 if nm != 'gul' else (a_ + 1) * 120 * m, 0, 255).astype(np.uint8), None, fx=0.5, fy=0.5))
     # bare rock ribs on the convex spur crests below the summits (never in the gullies)
-    rib = _ss(0.15, 0.6, -gul) * _ss(0.95, 0.65, hrel) * _ss(0.12, 0.3, steep)
+    rib = _ss(0.1, 0.5, -gul) * _ss(0.97, 0.6, hrel) * _ss(0.06, 0.18, steep)
     snow = snow * (1 - 0.85 * rib)
     if os.environ.get('TDBG'):
         cv2.imwrite(os.environ['TDBG'] + '_rib.png', cv2.resize((rib * 255).astype(np.uint8), None, fx=0.5, fy=0.5))
     # painted structure: dark rock outcrops breaking through the snow along the fine ribs (crisp, elongated
     # down the fall line), wind-scoured bare patches on the steep upper faces
     oc = _ss(0.32, 0.46, -ffn * 0.8 + 0.55 * (nf - 0.5) + 0.25 * _ss(0.2, 0.6, steep)) *         _ss(0.08, 0.3, steep) * _ss(1.02, 0.85, hrel) * _ss(-0.1, 0.25, -gul + 0.3)
-    snow = snow * (1 - 0.92 * oc)
+    snow = snow * (1 - 0.92 * oc * (0.2 + 0.8 * crest_w))
+    # rock strata / ledges: gently dipping bedding bands. On each band the lower part is a dark rock
+    # riser (wider on steeper ground) and the upper part a ledge that holds snow -> snow with a sharp
+    # edge against the rock band below, bands broken where couloirs (gullies) cut through them
+    sc_ = hrel * 11.0 + 0.9 * (na - 0.5) + 0.35 * (nf - 0.5) - 0.00018 * xs_scr / s
+    ph_ = sc_ - np.floor(sc_)
+    rw_ = 0.12 + 0.55 * _ss(0.04, 0.22, steep) + 0.15 * (nb - 0.5)
+    riser = _ss(rw_ + 0.03, rw_ - 0.02, ph_) * _ss(0.0, 0.05, ph_ + 0.04)
+    band_on = _ss(tl + 0.02, tl + 0.12, hrel) * _ss(1.0, 0.8, hrel) * (1 - _ss(0.15, 0.55, fln))
+    band_on = band_on * _ss(0.3, 0.55, nb + 0.25 * _ss(0.05, 0.2, steep))
+    strat_rock = riser * band_on * (0.15 + 0.85 * crest_w)
+    snow = snow * (1 - 0.9 * strat_rock)
+    # couloirs: the main erosion channels hold bright snow tongues straight down the fall line
+    cou = _ss(0.35, 0.7, fln) * _ss(tl - 0.05, tl + 0.1, hrel)
+    snow = np.maximum(snow, cou * 0.95)
     forest = _ss(tl + 0.03, tl - 0.03, hrel + 0.05 * (nb - 0.5) - 0.06 * fln) * (1 - snow)
     # forest band broken by snowy clearings / avalanche paths running down the gullies
     clear = _ss(0.35, 0.6, fln + 0.4 * (nf - 0.5)) * _ss(tl - 0.12, tl - 0.02, hrel)
@@ -405,9 +437,9 @@ def shade(X, Z, fields, pal, light_x, light_y, Wp, H, f, s, yH, y_off, ss, aeria
     rock = rock * (1 + 0.1 * (nb - 0.5)[..., None])
     # rock strata (slanted bedding lines) + crisp lit facets on the planes turned toward the comet
     strat = np.abs(np.sin(np.pi * (hrel * 16.0 + 4.0 * (na - 0.5) + 2.0 * (nf - 0.5) + 0.02 * xs_scr / s)))
-    rock = rock * (1 - 0.3 * _ss(0.86, 0.96, strat)[..., None])
+    rock = rock * (1 - 0.3 * (_ss(0.86, 0.96, strat) * crest_w)[..., None])
     facet = _ss(0.54, 0.58, nf + 0.25 * (dif - 0.5)) * _ss(0.35, 0.65, dif)
-    rock = rock + (P['rock_lit'] * 1.35 - rock) * (0.55 * facet)[..., None]
+    rock = rock + (P['rock_lit'] * 1.35 - rock) * (0.55 * facet * crest_w)[..., None]
     sv = np.clip(0.12 + 0.88 * v, 0, 1)
     snowc = P['snow_sh'] + (P['snow_lit'] - P['snow_sh']) * sv[..., None]
     hi = _ss(0.55, 0.85, dif) * prox
@@ -424,10 +456,16 @@ def shade(X, Z, fields, pal, light_x, light_y, Wp, H, f, s, yH, y_off, ss, aeria
     lc = _sample(lfg, Xs, Zs)
     rl = _ss(0.45, 0.85, -lc) * _ss(0.05, 0.25, 1 - ny) * (1 - forest) * _ss(0.25, 0.6, dif + 0.15)
     gl_ = _ss(0.5, 0.95, lc) * _ss(0.05, 0.25, 1 - ny) * (1 - 0.5 * forest)
-    img = img + rl[..., None] * (P['snow_hi'] - img) * 0.4
-    img = img * (1 - 0.28 * gl_[..., None])
+    img = img + (rl * (0.3 + 0.7 * crest_w))[..., None] * (P['snow_hi'] - img) * 0.4
+    img = img * (1 - 0.28 * (gl_ * (0.3 + 0.7 * crest_w))[..., None])
     # brush texture: low-amplitude streaky value variation down the fall line
-    img = img * (1 + 0.07 * (nf - 0.5)[..., None] + 0.05 * (na - 0.5)[..., None])
+    img = img * (1 + (0.07 * (nf - 0.5) * (0.3 + 0.7 * crest_w))[..., None] + 0.05 * (na - 0.5)[..., None])
+    if light_dir is not None:
+        # dark rock couloirs following the fall line (big channels), strongest in the shadow planes
+        flb = _sample(flbg, Xs, Zs)
+        cz = _ss(0.35, 0.8, flb) * _ss(0.97, 0.75, hrel) * _ss(tl - 0.02, tl + 0.1, hrel) * (1 - forest)
+        cz = cz * (0.55 + 0.45 * (1 - v)) * _ss(0.04, 0.2, steep)
+        img = img * (1 - 0.45 * cz[..., None]) + P['rock_sh'] * 0.45 * cz[..., None]
 
     # ---- aerial perspective + haze pooling at the feet
     fog = 1 - np.exp(-np.clip(Zs - 6.0, 0, None) / fog_d)
@@ -439,13 +477,22 @@ def shade(X, Z, fields, pal, light_x, light_y, Wp, H, f, s, yH, y_off, ss, aeria
     # ---- comet rim on crests / faces turned toward the comet
     ed = _edge_dist(np.where(valid, Z, 1e9).astype(np.float32), 1.08)
     rw = (1.5 * s + 0.2) * ss
-    facing = np.clip(0.3 + nx * lxs * 1.0 + ny * 0.35, 0, 1)
-    near_c = 0.25 + 0.75 * np.exp(-np.abs(xs_scr - light_x) / (0.32 * Wp))
-    rim = (np.exp(-ed / rw) * 0.85 + np.exp(-ed / (rw * 3.5)) * 0.25) * facing ** 1.2 * near_c
-    rim = rim * (0.6 + 0.4 * snow) * (1 - forest) * (1 - 0.4 * fog)
+    if light_dir is None:
+        facing = np.clip(0.3 + nx * lxs * 1.0 + ny * 0.35, 0, 1)
+        near_c = 0.25 + 0.75 * np.exp(-np.abs(xs_scr - light_x) / (0.32 * Wp))
+        rim = (np.exp(-ed / rw) * 0.85 + np.exp(-ed / (rw * 3.5)) * 0.25) * facing ** 1.2 * near_c
+        rim = rim * (0.6 + 0.4 * snow) * (1 - forest) * (1 - 0.4 * fog)
+    else:
+        # directional: strong on faces turned to the key, nothing on the far side; width varies, and the
+        # rim breaks where rock steps cut the crest
+        facing = _ss(0.05, 0.55, (nx * lxs * 0.9 + ny * 0.3) / np.sqrt(0.81 * lxs * lxs + 0.09))
+        near_c = 0.55 + 0.45 * np.exp(-np.abs(xs_scr - light_x) / (0.4 * Wp))
+        wv = 0.5 + 1.1 * nb
+        rim = (np.exp(-ed / (rw * wv)) * 0.9 + np.exp(-ed / (rw * 3.0 * wv)) * 0.2) * facing * near_c
+        rim = rim * (0.12 + 0.88 * snow) * (1 - forest) * (1 - 0.4 * fog) * _ss(0.25, 0.5, na + 0.2 * nf)
     img = img + rim[..., None] * np.asarray(rim_col, np.float32) * rim_amt
     # faces turned toward the comet carry a cool cyan cast (warm-cool split against the shadow planes)
-    face = _ss(0.45, 0.8, dif) * near_c * (0.4 + 0.6 * snow) * (1 - 0.6 * fog)
+    face = _ss(0.45, 0.8, dif) * (near_c if light_dir is None else 1.0) * (0.4 + 0.6 * snow) * (1 - 0.6 * fog)
     img = img + face[..., None] * np.array([0.02, 0.07, 0.1], np.float32) * rim_amt
     # lit snow faces toward the comet get a soft sheen too
     img = img + (hi * snow * facing)[..., None] * np.asarray(rim_col, np.float32) * 0.08 * rim_amt
@@ -488,9 +535,20 @@ def fields_from(hm, flux, crest, seed=3):
     # fine curvature (thin ridge-spur / gully lines, drawn as painted linework)
     l2 = cv2.Laplacian(cv2.GaussianBlur(hw, (0, 0), 1.3), cv2.CV_32F)
     lf2 = np.clip(l2 / (np.percentile(np.abs(l2), 96) + 1e-9), -1.5, 1.5)
+    # broad planes: normals of a heavily smoothed surface (big lit / shadow faces per spur)
+    hsb = cv2.GaussianBlur(a, (0, 0), 7.0)
+    gxb = np.gradient(hsb, axis=1) / RES
+    gzb = np.gradient(hsb, axis=0) / RES + hsb
+    nb_ = 1 / np.sqrt(gxb * gxb + gzb * gzb + 1)
+    # big couloir channels (fall-line flux at a coarse scale)
+    flb = lf - cv2.GaussianBlur(lf, (0, 0), 14.0)
+    flb = cv2.GaussianBlur(flb, (0, 0), 1.5)
+    flb = np.clip(flb / (np.percentile(np.abs(flb), 95) + 1e-6), -1.5, 1.5)
     return (hm.astype(np.float32), nxg.astype(np.float32), nyg.astype(np.float32), nzg.astype(np.float32),
             fl.astype(np.float32), cv_.astype(np.float32), crest.astype(np.float32), n1, n2,
-            ff.astype(np.float32), n3.astype(np.float32), lf2.astype(np.float32))
+            ff.astype(np.float32), n3.astype(np.float32), lf2.astype(np.float32),
+            (-gxb * nb_).astype(np.float32), nb_.astype(np.float32), (-gzb * nb_).astype(np.float32),
+            flb.astype(np.float32))
 
 
 # ----------------------------------------------------------------------------- scene-level entry point
@@ -522,12 +580,19 @@ PAL_FAR = dict(rock_sh=_hex('#33407e'), rock_lit=_hex('#4a5c9c'), snow_sh=_hex('
                snow_hi=_hex('#9cb8e6'), forest_sh=_hex('#2a4580'), forest_lit=_hex('#36568f'))
 
 
-def range_plates(Wp, H, W, y_h, b0, Hl, light, cache_dir=None, ss=2):
+def range_plates(Wp, H, W, y_h, b0, Hl, light, cache_dir=None, ss=2, light_dir=None):
     """Three RGBA plates (rows b0..Hl of the plate) + parallax factors, back to front."""
     f = float(Wp)
     s = W / 1920.0
     yH = y_h - 0.004 * H
     hm, flux, crest, rid = build_heightmap(RANGES, Wp, H, f, seed=5, cache_dir=cache_dir)
+    # fine rocky crest detail (notches, gendarmes, cauliflower breakup of the ridgelines): a small ridged
+    # displacement proportional to height (strongest on the summits), plus sharper minor spurs
+    nzs, nxs = hm.shape
+    det = ridged_mf(nxs, nzs, (U1 - U0) / 0.012, 3, 77, gain=0.5)
+    det2 = ridged_mf(nxs, nzs, (U1 - U0) / 0.004, 2, 79, gain=0.5)
+    hmask = np.clip(hm / (crest + 1e-3), 0, 1.2)
+    hm = (hm + hm * (0.07 * (det - 0.5) + 0.03 * (det2 - 0.5)) * _ss(0.3, 0.9, hmask)).astype(np.float32)
     fld = fields_from(hm, flux, crest)
     Hr = Hl - b0
     spec = [  # za, zb, palette, aerial colour, fog distance, softness, snowline, rim, parallax
@@ -539,14 +604,16 @@ def range_plates(Wp, H, W, y_h, b0, Hl, light, cache_dir=None, ss=2):
     for (za, zb, pal, ac, fogd, soft, sl, rim, par, rim_rim), wr in zip(spec, (0.55, 0.5, 0.42)):
         X, Z = cast(hm, Wp, Hr, b0, yH, f, za, zb, ss)
         rgba = shade(X, Z, fld, pal, light[0], light[1], Wp, H, f, s, yH, b0, ss, ac, fog_d=fogd, soft=soft,
-                     snow_lo=sl, rim_amt=rim)
-        rgba = silhouette_rim(rgba, light[0], Wp, s, amt=rim_rim, reach=0.42)
-        rgba = warm_rim(rgba, 0.3 * Wp, Wp, s, amt=wr)
+                     snow_lo=sl, rim_amt=rim, light_dir=light_dir)
+        rgba = silhouette_rim(rgba, light[0], Wp, s, amt=rim_rim * (3.0 if light_dir is None else 4.0), reach=0.42, haze_col=ac,
+                              light_dir=light_dir)
+        rgba = warm_rim(rgba, 0.3 * Wp, Wp, s, amt=wr * (0.55 if light_dir is not None else 1.0))
         out.append((rgba, par))
     return out
 
 
-def silhouette_rim(rgba, light_x, Wp, s, amt=0.85, reach=0.4, col=(0.8, 0.96, 1.06)):
+def silhouette_rim(rgba, light_x, Wp, s, amt=0.85, reach=0.4, col=(0.8, 0.96, 1.06), haze_col=None,
+                   light_dir=None):
     """Crisp 2-3 px comet-lit cyan-white rim along the plate's sky silhouette where it faces the comet
     (above, toward light_x), brightest near the comet axis and fading outward."""
     a = rgba[..., 3]
@@ -557,21 +624,49 @@ def silhouette_rim(rgba, light_x, Wp, s, amt=0.85, reach=0.4, col=(0.8, 0.96, 1.
     gx, gy = np.gradient(gm, axis=1), np.gradient(gm, axis=0)
     gn = np.sqrt(gx * gx + gy * gy) + 1e-6
     xs = np.arange(Ww, dtype=np.float32)[None, :]
-    lx = np.clip((light_x - xs) / (0.25 * Wp), -1, 1) * 0.8
-    ly = -1.0
+    lx = np.clip((light_x - xs) / (0.25 * Wp), -1, 1) * 1.0
+    ly = -0.45
+    if light_dir is not None:
+        lx = np.full_like(xs, float(light_dir))
+        ly = -0.6
     ln = math.sqrt(1.0) + 0 * lx
     ln = np.sqrt(lx * lx + ly * ly)
     # inward normal = +grad(a); outward = -grad -> facing = dot(-grad, light dir)
     facing = np.clip((-gx * lx - gy * ly) / (gn * ln), 0, 1)
-    facing = _ss(0.25, 0.85, facing)
+    facing = _ss(0.25, 0.85, facing) if light_dir is None else _ss(0.45, 0.9, facing)
     near = 0.42 + 0.58 * np.exp(-np.abs(xs - light_x) / (reach * Wp))
+    near = near * _ss(0.9, 0.7, np.arange(Hh, dtype=np.float32)[:, None] / Hh)
     rw = 1.25 * s + 0.35
+    if light_dir is not None:
+        # rim width varies along the crest (0.5x .. 1.7x)
+        rw = rw * (0.5 + 1.2 * C.fbm(Ww, 8, Ww / (0.03 * Wp), 2, seed=5)[4:5, :])
     core = _ss(rw * 2.0, rw * 0.9, dist) * (dist > 0)
+    brk = np.clip(0.55 + 0.9 * C.fbm(Ww, 8, Ww / (0.02 * Wp), 3, seed=int(light_x) % 97)[4:5, :] - 0.45, 0.25, 1)
+    if light_dir is not None:
+        brk = _ss(0.3, 0.55, C.fbm(Ww, 8, Ww / (0.012 * Wp), 3, seed=int(light_x) % 89)[4:5, :]) * 0.9 + 0.1
+    near = near * brk
     r = (core * 0.95 + np.exp(-dist / (rw * 3.0)) * 0.12 * (dist > 0)) * facing * near * amt
     r = np.clip(r, 0, 0.92)
     out = rgba.copy()
     c = np.asarray(col, np.float32)
     out[..., :3] = rgba[..., :3] * (1 - r[..., None]) + c * r[..., None]
+    # hot HDR core on the crest itself (1-2 px, >1 so the bloom picks it up)
+    hot = _ss(rw * 1.3, rw * 0.4, dist) * (dist > 0) * _ss(0.45, 0.95, facing) * near * min(amt, 1.2)
+    if light_dir is not None:
+        hot = hot * _ss(0.6, 1.0, facing)
+    out[..., :3] += hot[..., None] * c * 0.9
+    # shadow sides: the edge is lost into the haze (interior blends toward the aerial colour)
+    if haze_col is not None:
+        lost = np.exp(-dist / (rw * 5.0)) * (dist > 0) * (1 - facing) * 0.45
+        out[..., :3] = out[..., :3] * (1 - lost[..., None]) + np.asarray(haze_col, np.float32) * lost[..., None]
+    # small halation just outside the lit crest (lightens the sky over a few px)
+    outside = (a < 0.5).astype(np.uint8)
+    dout = cv2.distanceTransform(outside, cv2.DIST_L2, 5).astype(np.float32)
+    fac_o = cv2.GaussianBlur(facing * near * (dist < rw * 3), (0, 0), 3.0 * s + 0.5)
+    fac_o = fac_o / (cv2.GaussianBlur((dist < rw * 3).astype(np.float32), (0, 0), 3.0 * s + 0.5) + 1e-3)
+    halo = np.exp(-dout / (3.0 * s + 0.5)) * (dout > 0) * np.clip(fac_o, 0, 1) * 0.22 * min(amt, 1.0)
+    out[..., :3] = np.where((halo > out[..., 3])[..., None] & (a < 0.5)[..., None], c, out[..., :3])
+    out[..., 3] = np.maximum(out[..., 3], halo)
     return out
 
 

@@ -69,6 +69,79 @@ dabs grouped into masses (lit per MASS: pink-white tops, warm rose mids, lavende
 body behind covered clusters, warm transmitted sun-side fringes), fine wood tucked inside the blossom so only
 limbs cross it; far row denser with slimmer trunks; sky replaced by one continuous gradient over the tilt-up
 headroom (cerulean zenith -> pale warm horizon, tight sun glow) instead of the flat cobalt.
+Round 14 (reviewer FAIL: popcorn canopies, stick trunks, cobalt sky, empty end frame): both cherry rows rebuilt by
+s05_sakura_r14 - S-curved trunks forking into 3-5 random-walk scaffolds that taper and fork 3 levels deep; one big
+blossom MASS per scaffold built from 15-40 sub-clusters -> 3-7 bunches -> lumpy body dab + 5-petal florets + single
+blossoms (3 dab sizes, uneven spacing, sky holes, lacy fringe on the outer / lower edge); value painted per mass
+(+ per sub-mass) from a smooth form field with cast shadow between masses, quantised into broad bands (pink-white
+top plane, pink, mauve-lavender underside), warm salmon transmitted light on thin sun-side edges, crisp warm rim
+on the sun side / soft lost edge on the shadow side; visible limbs are trunk-connected prefixes that taper into a
+covering clump (no floating dashes), the rest of the wood only shows through the holes; far row in softer aerial
+pinks. Sky: deep cerulean only at the very top, pale cyan -> near-white over the lower ~40%, wider warm-white
+halation. Tilt-up halved (0.3 H): ends on the canopy crossing the top, the far bank + signs in view.
+Round 15 (reviewer FAIL: hexagon-flake mosaic canopy, jagged polygon fringe, plank trunks with a Y fork, weak
+transmitted light, magenta undersides, clip-art hero branch, flat hedge, uniform far puffs): both cherry rows rebuilt
+by s05_sakura_r15 - value PAINTED per mass, not per dab: (a) smooth per-mass form field through soft value bands
+(pink-white top plane, light / mid pink, cool mauve-lavender, blue-violet core) + low-frequency wash; (b) every
+sub-cluster one scalloped cauliflower shape (20-60 px lobes) with a crisp sun-side crescent and a lost underside,
+weighted by exposure so buried clusters melt into the mass; edges crumble into round flower-head dabs (organic
+blob field, no grid); (c) sparse 5-petal dabs / specks only on the lit silhouette and lit tops; scalloped sky holes
+revealing thin limbs, pink halation into holes and around the crown, warm peach transmitted band + rim on the
+sun-facing silhouette. Gnarled trunks (random-walk centre line, elbows, burls, root flare) with scaffolds leaving at
+different heights; wood rasterised as capsules with (across, along) coordinates -> blue-violet shadow side, warm
+mid band, 1-2 px gold rim, cool bounce, horizontal lenticel dashes (sakura bark banding); visible limbs taper into
+cover clumps where they enter the crown, thin limbs cross the masses, bare wood away from blossom trimmed. Far row:
+same painter, softer aerial palette, varied size / height / lean / gnarl. Hedge repainted as cauliflower clump rows
+with lit tops, teal undersides and fallen petals (s05_sakura_hedge15); hero branch: denser node bunches, more twig
+forks, near-plane defocus.
+Round 16 (reviewer FAIL: cotton-candy canopy, square-cut limbs / floating fragments, flat violet underside,
+balloon-on-string blossoms, clay trunks, speckle noise, clay hedge, tilt too big): both cherry rows rebuilt by
+s05_sakura_r16 - a real branch skeleton (trunk of varied shape / lean, 3-5 scaffolds forking recursively to thin
+twigs with continuous Leonardo taper, no truncation) carrying blossom clusters (3-7 scalloped flower heads + rim
+florets + deeper-rose inner blossoms) strung along the twigs; half the clusters drawn behind the wood and half in
+front so limbs weave through the blossom; patch gating leaves ~25% sky holes. Value from a smooth crown field
+(form normal, crown height, per-mass top/underside, cast shadow) quantised into flat bands: cool lavender-grey core,
+mauve shade, rose, light pink, pink-white tops; warm peach transmitted light on the thin sun-side clusters; crisp
+lit edges, softened shadow-side edges. Grey-violet bark with fissures, lichen / moss, lit rim + cool bounce, flared
+foot sinking into the grass. Hedge repainted as leaf-dab clumps (s05_sakura_hedge16). Tilt-up cut 30% with a
+softer sine ease.
+Round 18 (final-panel: lollipop / cotton-candy crowns, washed-out left bank, overused ghosts): both cherry rows
+painted by s05_sakura_r18 - every flower head is a clump of small AA five-petal blossoms (sun-side blossoms on top
+with pale pink-white tips, far side a band darker) over a hard-edged violet / magenta core; more saturated palette;
+only 35% of the clusters in front of the wood so limbs and twigs run into and across the blossom; mass underpaint
+shrunk inside the blossom and deepened (no smooth pink blobs), halation kept out of the crown's sky holes; more
+low-frequency sky holes. Far-bank town dehazed (colour pulled away from the lavender haze, cooler deeper shade faces,
+warmer lit walls, slate roofs kept grey-blue). Flare reduced to one chain of three small round ghosts; stronger
+sun shafts through the canopy.
+Round 19 (reviewer FAIL: no sun-side rim, flat canopy values, game-asset hedge, smeary cloud, streaky buildings,
+clipped sign word): crowns by s05_sakura_r19.Painter19 - three hard value tiers (pale cream-pink tips / rose /
+blue-violet + crimson-mauve shadow core in the undersides and beside the trunk), lower crown sinking into shade,
+varied dab size (big in the mass body, fine at the rim), rounder dabs, a near-white cream rim on sun-facing
+silhouettes; scene-level crown rim + warm halo strongest near the sun (_crown_rim). Hedge repainted as muted
+leaf-cluster masses (s05_sakura_hedge19: warm olive lit tops, cool blue-green undersides, crisp leaf fringe, lost
+lower edges). Hero cumulus repainted in flat scalloped value tiers (_cloud19, no sphere lobes). Far bank: rain-
+streak banding cut, deeper eave soot, sun glints on window panes; vertical signs use short complete words and are
+lettered only on their unoccluded rows. Sun: tighter halation, shorter starburst rays; painted light shafts
+falling across the canal (_canal_shafts).
+Round 22 (reviewer FAIL: uniform lilac clay canopy, white confetti tips, rivet-dot bark, dark street level, VP glare,
+lilac cast): crowns by s05_sakura_r22.Painter22 - clusters grouped per mass into flat value planes (crisp pale
+near-white pink lit top groups, a light-pink mid band, ONE cool darker magenta-violet underside with soft lost edges),
+petal-tip sprays only on exposed sun-facing clumps, more sky holes; bark with horizontal lenticel dashes + cracks in
+one flat darker value on a flat cool violet-brown shadow side; scene crown rim only on the outer silhouette; path
+shafts -40% and suppressed near the vanishing point; warm-gold grade on the lit path pools / grass verge
+(_warm_grade); shopfronts with lit awning tops + cast shadow, lit glass interiors, noren, nobori, planters, A-frame
+signs, bicycles and warm/cool fascias (s05_sakura_shops).
+Round 23 (reviewer FAIL: two-tone popcorn canopy with a lavender underside, cotton-ball clumps with hard outlines,
+floating clumps, vector-ribbon trunks, clean-CG town / rails, stray pale 'mountain'): crowns by s05_sakura_r23 -
+every cluster built from 5-petal flower dabs 3-8 px across in 1-3 umbels with sky / twig gaps INSIDE the masses
+(cm5_01), per-flower value from its place in the mass (pale lit top group, thin mid-pink band, cool rose-magenta
+underside hue ~330 with softer edges), petal-tip crescents only on sun-facing flowers, rose (not violet) under-haze,
+subtler cream rim; Tree23 with a real limb taper, blossom sitting on the twigs, fewer patch holes; bark with a hard
+warm lit edge, one flat cool grey-violet shadow side (~40%), denser lenticels, knots, lichen / scab patches.
+Town wear pass (s05_sakura_town23: rain streaks, stains, plinths, eave soot, warm lit / cool shade face families,
+slab undersides, stronger aerial fade) + canal wall warm/cool split; railing repainted as grey-blue steel with a
+warm top-edge specular, cool underside and distance falloff (s05_sakura_rail23); the cumulus bank's shade tail
+now fades into the horizon haze (no violet ridge above the roofs).
 """
 import math
 import os
@@ -108,12 +181,31 @@ import s05_sakura_r10 as R10  # noqa: E402
 import s05_sakura_r11 as R11  # noqa: E402
 import s05_sakura_r12 as R12  # noqa: E402
 import s05_sakura_r13 as R13  # noqa: E402
+import s05_sakura_r14 as R14  # noqa: E402
+import s05_sakura_r15 as R15  # noqa: E402
+import s05_sakura_hedge15 as HG15  # noqa: E402
+import s05_sakura_r16 as R16  # noqa: E402
+import s05_sakura_hedge16 as HG16  # noqa: E402
+import s05_sakura_r17 as R17  # noqa: E402
+import s05_sakura_r18 as R18  # noqa: E402
+import s05_sakura_r19 as R19  # noqa: E402
+import s05_sakura_hedge19 as HG19  # noqa: E402
+import s05_sakura_r20 as R20  # noqa: E402
+import s05_sakura_town20 as TW20  # noqa: E402
+import s05_sakura_hedge20 as HG20  # noqa: E402
+import s05_sakura_r21 as R21  # noqa: E402
+import s05_sakura_shops as SH21  # noqa: E402
+import s05_sakura_r22 as R22  # noqa: E402
+import s05_sakura_r23 as R23  # noqa: E402
+import s05_sakura_town23 as TW23  # noqa: E402
+import s05_sakura_rail23 as RL23  # noqa: E402
 
 DURATION = 5.0
 TRAVEL = 2.0          # metres of lateral camera travel over the shot (round 2: ~40% slower)
 HERO_Z = 5.5          # effective depth of the hand-painted foreground branch
-CRANE = 0.62          # tilt-up (fraction of H) following the petals into the sky (round 10: longer, gentler)
+CRANE = 0.21         # round 16: -30% tilt; tilt-up (fraction of H) following the petals into the sky (round 10: longer, gentler)
 CRANE_T = (0.0, 5.0)      # round 10: symmetric sine ease over the whole shot (peak speed ~45% lower)
+MOVE_SPAN = 0.6           # round 21: both axes travel 60% of the old span (same end framing)
 
 SPRING_SKY = dict(stops=[(0.0, '#2459c4'), (0.22, '#3272d4'), (0.45, '#5595e2'), (0.66, '#8dbdee'),
                          (0.84, '#bfdcf3'), (1.0, '#e2eff6')],
@@ -152,6 +244,11 @@ BLOSSOM_PAL = dict(lit=np.array([1.0, 0.75, 0.83], np.float32), hot=np.array([1.
                    bounce=np.array([0.9, 0.64, 0.66], np.float32), glow=np.array([1.06, 0.8, 0.64], np.float32))
 BARK = np.array([[0.05, 0.036, 0.06], [0.3, 0.19, 0.15]], np.float32)
 BARK_FAR = np.array([[0.2, 0.18, 0.3], [0.44, 0.34, 0.38]], np.float32)     # distant trunks: lighter, bluer
+
+
+def _ss(x):
+    x = np.clip(x, 0.0, 1.0)
+    return x * x * (3 - 2 * x)
 
 
 def _ease(u):
@@ -199,7 +296,12 @@ class Scene:
         # ---------------------------------------------------------------- optics / sparkles
         self.flare = SFX.SunFlare(W, H)
         # round 11: round, soft ghosts only (no hexagonal aperture ghosts)
-        self.flare.ghosts = [(g[0], g[1], g[2], 0, g[4] * 0.8, g[5]) for g in self.flare.ghosts]
+        # round 18 (panel: 'ghosts / bokeh overused'): one restrained chain of three small round ghosts; the
+        # light budget goes into the sun shafts through the canopy instead
+        self.flare.ghosts = [(0.42, 0.006, (1.0, 0.86, 0.66), 0, 0.09, False),
+                             (0.86, 0.011, (0.66, 0.8, 1.0), 0, 0.035, False),
+                             (1.45, 0.017, (1.0, 0.7, 0.85), 0, 0.03, False)]
+        self.flare.g1, self.flare.g2 = 0.75, 0.2      # round 21: sun glow kept local (no milky veil)
         self.paper = self._paper()
         self._sky_rows = int(0.64 * H)
         yy = np.arange(H, dtype=np.float32)[:, None, None]
@@ -246,6 +348,18 @@ class Scene:
         sh = self.glit.sheen(self.water_a, None)
         self._sheen = np.ascontiguousarray(sh[:, self.emx:self.emx + W]).astype(np.float32)
         sc_ = int(np.clip(self.sun_xy[0] + self.emx, 0, self.far_invz.shape[1] - 1))
+        # round 19: warm specular star glints on the sunlit far-bank window panes (move with the town plate)
+        fa_ = np.maximum(self.far_a - self.water_a, 0)
+        lumw = (self.far_pm.mean(-1) / np.maximum(self.far_a, 1e-4)) * (fa_ > 0.9)
+        wy_, wx_ = np.nonzero((lumw > 0.9) & (np.arange(lumw.shape[0])[:, None] < self.cam.hy - 4))
+        rg_ = np.random.default_rng(1919)
+        if len(wy_):
+            sel_ = rg_.choice(len(wy_), min(16, len(wy_)), replace=False)
+            self._wg_y, self._wg_x = wy_[sel_], wx_[sel_]
+            self._wg_sz = W * rg_.uniform(0.006, 0.012, len(sel_))
+            self._wg_in = rg_.uniform(0.5, 1.0, len(sel_))
+        else:
+            self._wg_y = None
         self._sheen_invz = self.far_invz[:, sc_].astype(np.float32)
 
     # ================================================================== sky
@@ -269,10 +383,12 @@ class Scene:
             R9E.cumulus9(K2, P, cx_, by_, cw_, ch_, seed=sd_, pal=K2.mix_palette(CU_PAL, 'noon_far', dist_), n=5,
                          haze=0.3 * dist_, levels=CU_LEV, firm=1.0, soften=0.08, term_noise=0.1, brush=0.02)
         P.lining(1.8, rim_px=3.0, halo=0.6)
-        hero = self._silver(P.rgba(), 2.6)
+        hero = self._silver(self._cloud19(P.rgba(), (sun_p[0], sun_p[1])), 2.2)     # round 19: painted tiers
+        hero = self._cloud_base_fade(hero)
         P = K2.Painter(pw, ph, sun_p, pal, u_, seed=33, sun_z=0.35)
         for (cx_, by_, cw_, ch_, sd_, dist_) in ((0.1 * pw, 0.42 * H, 0.18 * W, 0.06 * H, 21, 0.55),
-                                                (0.84 * pw, 0.4 * H, 0.12 * W, 0.045 * H, 23, 0.7)):
+                                                (0.84 * pw, 0.4 * H, 0.12 * W, 0.045 * H, 23, 0.7),
+                                                ):
             K2.cumulus(P, cx_, by_, cw_, ch_, seed=sd_, pal=K2.mix_palette(CU_PAL, 'noon_far', dist_), n=3,
                        haze=0.35 * dist_, levels=CU_LEV, sun_jitter=8.0)
         P.lining(1.0, rim_px=2.5)
@@ -295,29 +411,221 @@ class Scene:
             z[..., :3] = p_[:1, :, :3]
             return np.concatenate([z, p_], 0)
         # round 11: high cirrus / mackerel wisps in the headroom - the tilt-up ends on open sky with texture
-        hi = K2.cirrus_plate(pw, ph + M, preset='noon', seed=12, region=(0.02, 0.5 * M / (ph + M) + 0.02),
+        hi = K2.cirrus_plate(pw, ph + M, preset='noon', seed=12, region=(0.0, max(0.5 * M / (ph + M) + 0.02, 0.12)),
                              angle=-8, density=0.35, opacity=0.3)
         self.clouds = S.CloudDrift([(hi, 0.0015, 0.02), (padp(cir), 0.0012, 0.02), (padp(bank), 0.0006, 0.02),
                                     (padp(far), 0.0012, 0.03, 0.0005), (padp(hero), 0.002, 0.04, 0.0008)])
         self.sky = sky
 
+    @staticmethod
+    def _cloud_base_fade(rgba):
+        """round 23 (reviewer: 'pale mountain fragment behind the town'): the cumulus bank's lower shade tail
+        peeked over the roofs as a violet ridge.  Its base now sinks into the pale horizon haze (aerial fade:
+        lit top kept, soft pale base) so what shows above the roofs reads as cloud, not a mountain."""
+        a = rgba[..., 3]
+        rows = np.nonzero((a > 0.5).any(1))[0]
+        if len(rows) < 4:
+            return rgba
+        y0, y1 = rows[0], rows[-1]
+        yy = np.arange(a.shape[0], dtype=np.float32)[:, None]
+        t = np.clip((yy - (y0 + 0.3 * (y1 - y0))) / max(0.45 * (y1 - y0), 1.0), 0, 1)
+        t = t * t * (3 - 2 * t)
+        haze = np.array([0.84, 0.9, 0.97], np.float32)
+        out = rgba.copy()
+        out[..., :3] = rgba[..., :3] + (haze - rgba[..., :3]) * (0.72 * t)[..., None]
+        out[..., 3] = a * (1.0 - 0.35 * t)
+        return out
+
+    def _cloud17(self, rgba, sun):
+        """round 17: the hero cumulus' shadow side was a flat violet cutout.  Repaint it as cumulus: blue-grey
+        shade with lobe structure (each lobe a lighter sun-side crescent over a darker core), warm-white lit
+        top, a crisp silhouette only on the lit side (lost soft edge on the shade side), and an aerial fade
+        toward the pale horizon at its base."""
+        W, H = self.W, self.H
+        u = W / 1920.0
+        out = rgba.copy()
+        A = np.ascontiguousarray(out[..., 3])
+        rgb = out[..., :3]
+        hh, ww = A.shape
+        lum = rgb.mean(-1)
+        sat = rgb.max(-1) - rgb.min(-1)
+        sm = np.clip((0.88 - lum) / 0.1, 0, 1) * (A > 0.02)
+        sm = cv2.GaussianBlur(sm.astype(np.float32), (0, 0), 1.2 * u)
+        # blue-grey instead of violet (keep value, drop the magenta)
+        bg_ = np.stack([lum * 0.9, lum * 0.97, lum * 1.12], -1)
+        rgb = rgb + (bg_ - rgb) * (0.85 * sm)[..., None]
+        # cauliflower lobes along the shade-side silhouette (they also break the peaked outline): each lobe a
+        # blue-grey body with a broad, softly blended lighter face toward the sun and a crisp sun-side edge
+        rng = np.random.default_rng(1717)
+        ys, xs = np.nonzero(sm > 0.6)
+        if len(xs):
+            dx_, dy_ = sun[0] - xs.mean(), sun[1] - ys.mean()
+            dn = math.hypot(dx_, dy_) + 1e-6
+            lx, ly = dx_ / dn, dy_ / dn
+            cols_ = np.unique(xs)
+            x0_, x1_ = int(np.percentile(cols_, 3)), int(np.percentile(cols_, 99))
+            topy = np.full(ww, 1e9)
+            am = A > 0.5
+            anyc = am.any(0)
+            topy[anyc] = np.argmax(am, 0)[anyc]
+            lobes = []
+            x = x0_
+            while x < x1_:
+                r = rng.uniform(0.016, 0.04) * W
+                ty = topy[int(np.clip(x, 0, ww - 1))]
+                if ty < 1e8 and sm[int(min(ty + r, hh - 1)), int(x)] > 0.3:
+                    lobes.append((x, ty + 0.75 * r, r))
+                    r2 = r * rng.uniform(1.2, 1.7)
+                    lobes.append((x + rng.uniform(-0.5, 0.5) * r, ty + 0.75 * r + rng.uniform(1.3, 2.2) * r, r2))
+                x += r * rng.uniform(1.0, 1.6)
+            lobes.sort(key=lambda q: -((q[0] - sun[0]) ** 2 + (q[1] - sun[1]) ** 2) * 0 + q[1] * 0 - q[2] * 0 +
+                       math.hypot(q[0] - sun[0], q[1] - sun[1]) * -1)
+            yg0, xg0 = np.mgrid[0:hh, 0:ww].astype(np.float32)
+            body = np.array([0.67, 0.7, 0.84], np.float32)
+            face_c = np.array([0.82, 0.84, 0.92], np.float32)
+            for (cx, cy, r) in lobes:
+                xa, xb = int(max(0, cx - r - 4)), int(min(ww, cx + r + 5))
+                ya, yb = int(max(0, cy - r - 4)), int(min(hh, cy + r + 5))
+                if xb <= xa or yb <= ya:
+                    continue
+                X_ = xg0[ya:yb, xa:xb] - cx
+                Y_ = yg0[ya:yb, xa:xb] - cy
+                d = np.sqrt(X_ * X_ + Y_ * Y_)
+                # scalloped rim
+                th = np.arctan2(Y_, X_)
+                re = r * (1 - 0.06 + 0.06 * np.abs(np.cos(3.5 * th + cx)))
+                facing_ = (X_ * lx + Y_ * ly) / (d + 1e-3)
+                soft = 1.0 + 3.0 * u * np.clip(-facing_, 0, 1)             # crisp toward the sun, soft away
+                cov = np.clip((re - d) / soft + 0.5, 0, 1)
+                t_ = np.clip((X_ * lx + Y_ * ly) / r * 0.5 + 0.5, 0, 1)    # 1 on the sun side
+                hgt = np.clip((cy - 0.3 * H) / (0.2 * H), 0, 1)
+                c_ = body + (face_c - body) * (_ss(t_ * 1.4 - 0.45) * 0.85)[..., None]
+                c_ = c_ * (1.0 + 0.04 * (1 - hgt))
+                rgb[ya:yb, xa:xb] = rgb[ya:yb, xa:xb] * (1 - cov[..., None]) + c_ * cov[..., None]
+                A[ya:yb, xa:xb] = A[ya:yb, xa:xb] + cov * (1 - A[ya:yb, xa:xb])
+        # vertical gradation inside the shade: a little reflected light low down
+        yy = np.arange(hh, dtype=np.float32)[:, None]
+        # warm-white lit top
+        lm = np.clip((lum - 0.9) / 0.05, 0, 1)
+        rgb = rgb + (np.array([1.0, 0.97, 0.9], np.float32) - rgb) * (0.35 * lm)[..., None]
+        # lost edge on the shade side, crisp on the lit side
+        Ab = cv2.GaussianBlur(A, (0, 0), 10 * u)
+        gx = cv2.Sobel(Ab, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(Ab, cv2.CV_32F, 0, 1, ksize=3)
+        gn = np.sqrt(gx * gx + gy * gy) + 1e-6
+        yg, xg = np.mgrid[0:hh, 0:ww].astype(np.float32)
+        dx, dy = sun[0] - xg, sun[1] - yg
+        dd = np.sqrt(dx * dx + dy * dy) + 1e-6
+        facing = -(gx * dx + gy * dy) / (gn * dd)          # +1: edge faces the sun
+        away = np.clip((0.1 - facing) / 0.5, 0, 1)
+        As = cv2.GaussianBlur(A, (0, 0), 4 * u)
+        A = A + (As - A) * away * 0.85
+        # aerial perspective: the base sinks into the pale horizon haze
+        hz = self.cam.hy
+        f = np.clip((yy - (hz - 0.2 * H)) / (0.17 * H), 0, 1) * 0.6
+        hzc = np.array([0.9, 0.94, 0.97], np.float32)
+        rgb = rgb + (hzc - rgb) * f[..., None]
+        A = A * (1 - 0.3 * f[:, 0][:, None])
+        out[..., :3] = rgb
+        out[..., 3] = np.clip(A, 0, 1)
+        return out.astype(np.float32)
+
+    def _cloud19(self, rgba, sun):
+        """round 19 (reviewer: 'grey-violet smear with soft blurred lobes'): the hero cumulus is repainted in
+        flat painted value tiers - warm-white lit tops, pale lit face, clean blue-grey mid shade, blue-grey core -
+        whose boundaries are scalloped by multi-scale cauliflower bumps (crisp lobe tops), a crisp silhouette on
+        the sun / sky side, a lost edge on the underside and an aerial fade into the horizon haze at the base."""
+        W, H = self.W, self.H
+        u = W / 1920.0
+        out = rgba.copy()
+        A = np.ascontiguousarray(out[..., 3])
+        hh, ww = A.shape
+        rgb = out[..., :3]
+        lum = cv2.GaussianBlur(rgb.mean(-1), (0, 0), 3.0 * u)
+        rng = np.random.default_rng(1919)
+        # multi-scale cauliflower bump field (cones around random seeds -> circular iso-lines)
+        m = A > 0.05
+        ys, xs = np.nonzero(m)
+        B = np.zeros((hh, ww), np.float32)
+        if len(xs):
+            for r, wgt in ((80 * u, 0.65), (40 * u, 0.35)):     # round 21: bigger lobes (no camo fragments)
+                n = int(np.clip(m.sum() / (r * r) * 0.9, 10, 20000))
+                pick = rng.choice(len(xs), n)
+                seeds = np.full((hh, ww), 255, np.uint8)
+                seeds[ys[pick], xs[pick]] = 0
+                d = cv2.distanceTransform(seeds, cv2.DIST_L2, 5)
+                B += wgt * np.clip(1 - d / r, 0, 1) ** 0.6
+        # value: the clouds2 light + the bumps, a darker lower body
+        yy = np.arange(hh, dtype=np.float32)[:, None]
+        # large-scale form: lit toward the top / the sun, shade toward the base and the far side
+        if len(xs):
+            y0c, y1c = np.percentile(ys, 2), np.percentile(ys, 98)
+            x0c, x1c = np.percentile(xs, 2), np.percentile(xs, 98)
+        else:
+            y0c, y1c, x0c, x1c = 0, hh, 0, ww
+        xg = np.arange(ww, dtype=np.float32)[None, :]
+        G = -1.6 * (yy - (0.55 * y0c + 0.45 * y1c)) / max(y1c - y0c, 1) - 0.9 * (xg - (x0c + x1c) / 2) / max(x1c - x0c, 1)
+        # per-lobe light: each bump brighter on its sun-facing (upper-left) half
+        Bsh = np.roll(np.roll(B, int(9 * u), 0), int(7 * u), 1)
+        v = 0.4 * (lum - 0.82) / 0.15 + 1.25 * G + 0.45 * (B - 0.45) + 1.1 * (B - Bsh)
+        # round 21: one coherent mass - the value field is smoothed so tier boundaries are broad painted planes
+        v = cv2.GaussianBlur(v.astype(np.float32), (0, 0), 4.0 * u)
+        tiers = np.array([[0.64, 0.7, 0.85], [0.76, 0.8, 0.9], [0.9, 0.91, 0.94], [1.0, 0.98, 0.93]], np.float32)
+        th = (-0.55, 0.05, 0.75)
+        c = tiers[0][None, None, :] * np.ones((hh, ww, 1), np.float32)
+        for i, t_ in enumerate(th):
+            k = np.clip((v - t_) / 0.08 + 0.5, 0, 1)[..., None]          # crisp (2-3 px) tier boundaries
+            c = c + (tiers[i + 1] - c) * k
+        # a touch of warm reflected light low in the shade (ground bounce)
+        hz = self.cam.hy
+        low = np.clip((yy - (hz - 0.2 * H)) / (0.1 * H), 0, 1)
+        shade = np.clip((0.2 - v) / 0.6, 0, 1)
+        c = c + (np.array([0.8, 0.78, 0.84], np.float32) - c) * (0.35 * low * shade)[..., None]
+        # silhouette: crisp everywhere except the underside / away from the sun
+        Ac = np.clip((A - 0.5) / 0.12 + 0.5, 0, 1)
+        Ab = cv2.GaussianBlur(A, (0, 0), 10 * u)
+        gy = cv2.Sobel(Ab, cv2.CV_32F, 0, 1, ksize=3)
+        gx = cv2.Sobel(Ab, cv2.CV_32F, 1, 0, ksize=3)
+        gn = np.sqrt(gx * gx + gy * gy) + 1e-6
+        down = np.clip((-gy / gn - 0.2) / 0.5, 0, 1)                    # edge whose outside is below
+        As = cv2.GaussianBlur(A, (0, 0), 5 * u)
+        A = Ac + (As - Ac) * down * 0.9
+        # aerial perspective: the base sinks into the pale horizon haze
+        f = np.clip((yy - (hz - 0.2 * H)) / (0.17 * H), 0, 1) * 0.55
+        hzc = np.array([0.9, 0.94, 0.97], np.float32)
+        c = c + (hzc - c) * f[..., None]
+        A = A * (1 - 0.3 * f[:, 0][:, None])
+        out[..., :3] = c
+        out[..., 3] = np.clip(A, 0, 1)
+        return out.astype(np.float32)
+
     def _sky13(self, w, h, hz_row, sun):
         W = self.W
         r = np.arange(h, dtype=np.float32)
         e = np.clip((hz_row - r) / hz_row, -0.2, 1.0)
-        stops = [(-0.2, (0.93, 0.95, 0.97)), (0.0, (0.94, 0.96, 0.96)), (0.06, (0.84, 0.92, 0.97)),
-                 (0.16, (0.64, 0.82, 0.96)), (0.32, (0.45, 0.7, 0.94)), (0.6, (0.32, 0.59, 0.9)),
-                 (1.0, (0.24, 0.49, 0.85))]
+        # round 14: deep cerulean only at the very top, pale cyan -> near-white over the lower ~40% of the sky
+        # round 21: readable cyan -> cream gradient (no milky white veil over the lower sky)
+        stops = [(-0.2, (0.93, 0.94, 0.92)), (0.0, (0.95, 0.94, 0.88)), (0.08, (0.84, 0.92, 0.94)),
+                 (0.2, (0.68, 0.86, 0.96)), (0.36, (0.56, 0.79, 0.96)), (0.6, (0.47, 0.73, 0.95)),
+                 (0.8, (0.46, 0.7, 0.93)), (0.92, (0.38, 0.63, 0.91)), (1.0, (0.3, 0.56, 0.88))]
         xs = [q[0] for q in stops]
         col = np.stack([np.interp(e, xs, [q[1][c] for q in stops]) for c in range(3)], -1).astype(np.float32)
         img = np.broadcast_to(col[:, None, :], (h, w, 3)).copy()
         yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
         d2 = ((xx - sun[0]) ** 2 + (yy - sun[1]) ** 2) / (W * W)
-        g = (0.2 * np.exp(-d2 / 0.006) + 0.06 * np.exp(-d2 / 0.06))[..., None]
+        g = (0.32 * np.exp(-d2 / 0.0035) + 0.025 * np.exp(-d2 / 0.03))[..., None]   # round 21: glow local      # round 19: tighter halation, bluer sky round the sun
         img = img + (np.array([1.0, 0.97, 0.9], np.float32) - img) * np.clip(g, 0, 1)
         # a gentle lateral lift toward the sun side (the sky is brighter under the sun)
-        lat = (1.0 - xx / w)[..., None] * 0.04
+        lat = (1.0 - xx / w)[..., None] ** 1.5 * 0.015
         img = img + (1.0 - img) * lat
+        # round 17: the upper sky is no flat cyan - deeper, slightly violet-cerulean away from the sun, and a
+        # very broad painted value drift (brush-wash, not noise)
+        away = np.clip((xx / w - 0.35) / 0.65, 0, 1) * np.clip(e, 0, 1)[:, None] ** 1.2
+        img = img + (np.array([0.24, 0.45, 0.84], np.float32) - img) * (0.28 * away)[..., None]
+        rng = np.random.default_rng(1313)
+        wn = cv2.resize(rng.standard_normal((6, 10)).astype(np.float32), (w, h), interpolation=cv2.INTER_CUBIC)
+        wn = cv2.GaussianBlur(wn, (0, 0), 0.05 * W)
+        img = img * (1.0 + 0.025 * wn * np.clip(e, 0, 1)[:, None])[..., None]
         return img.astype(np.float32)
 
     def _silver(self, rgba, amt):
@@ -363,6 +671,12 @@ class Scene:
         Wc = W + 2 * self.emx
         Hs, Ws = H * ss, Wc * ss
         B, poles = E.make_boxes()
+        # round 17: the nearest land-side house (its gable cropped awkwardly at the top-right) is dropped - the
+        # blossom tunnel and the next houses fill that corner
+        B = B.copy()
+        near_h = (B[:, 11] == 5) & (B[:, 4] < 40.0)
+        B[near_h, 0] += 300.0
+        B[near_h, 1] += 300.0
         # keep the far skyline low (the sky is the hero): cap building tops at an elevation angle
         e_max = (cam.hy - 0.34 * H) / cam.f
         for i in range(len(B)):
@@ -394,7 +708,7 @@ class Scene:
                     self.sun_xy[0], spot)
         SG.paint_signs(out, bid, face, uo, Yo, so, B, ss, min_px=150, wscale=W / 1920.0)
         # round 7: painted accent lines where surfaces meet + rain-stain weathering (no clean CG boxes)
-        FC.weather(out, mat, uo, Yo, so, face, layer, Zo)
+        FC.weather(out, mat, uo, Yo, so, face, layer, Zo, amt=0.25)     # round 19: no vertical stripe banding
         FC.ink(out, mat, bid, face, Zo, layer, ss, W / 1920.0)
         # round 9: grime under eaves / sills, damp plinths, panel variation (both banks), ink on the land-side
         # houses, painted clumped hedge
@@ -414,7 +728,37 @@ class Scene:
             out[..., :3] = rgbf + (det - rgbf) * fm[..., None]
         # round 9: distant blocks sink into the aerial haze (after the local-contrast push)
         R9E.far_haze(out, mat, layer, Zo)
+        # round 18 (panel: 'washed-out left-bank buildings'): dehaze the near / mid far-bank town - pull the
+        # colour away from the lavender haze, deepen the shade faces toward a cool blue-violet, warm and
+        # saturate the sunlit faces (keeps the far blocks hazy for aerial perspective)
+        fm = ((layer == 0) & (mat == 5)).astype(np.float32)
+        if fm.any():
+            rgbf = out[..., :3]
+            near = np.clip((220.0 - Zo) / 150.0, 0, 1) * fm
+            lum = rgbf.mean(-1, keepdims=True)
+            det = haze + (rgbf - haze) * 1.3
+            lum2 = det.mean(-1, keepdims=True)
+            blue_ = np.clip((det[..., 2:3] - 0.5 * (det[..., :1] + det[..., 1:2]) - 0.12) / 0.15, 0, 1)
+            det = lum2 + (det - lum2) * (1.25 - 0.45 * blue_)       # warm walls up, slate roofs stay grey-blue
+            sh_ = np.clip((0.62 - lum) / 0.25, 0, 1)
+            det = det * (1 - 0.22 * sh_) + np.array([0.2, 0.22, 0.42], np.float32) * (0.1 * sh_)
+            lt_ = np.clip((lum - 0.66) / 0.2, 0, 1)
+            det = det * (1 + lt_ * np.array([0.05, 0.01, -0.06], np.float32))
+            out[..., :3] = rgbf + (np.clip(det, 0, 1.2) - rgbf) * near[..., None]
 
+        # round 20: painted roof hue / tile mottle, warm lit + cool shade facades, AC units / laundry / signs,
+        # blue aerial haze on the distant blocks
+        TW20.town_pass(out, mat, bid, face, uo, Yo, so, layer, Zo, cam.f, float(ss), W, B[:, 6].astype(np.int32))
+        if os.environ.get('S05_ENV_DUMP'):
+            np.savez(os.environ['S05_ENV_DUMP'], out=out, mat=mat, bid=bid, face=face, uo=uo, Yo=Yo, so=so,
+                     layer=layer, Zo=Zo, B=B)
+        # round 21: painted ground-floor shopfronts (awnings, glazed bays, fascia boards) on the front row
+        SH21.shopfronts(out, mat, bid, face, uo, Yo, so, layer, Zo, B)
+        SH21.calm_windows(out, mat, bid, face, Yo, layer, Zo, B)
+        # round 23: painted wear (rain streaks, stains, plinths, eave soot), warm lit / cool shade face families,
+        # slab undersides, stronger aerial fade on the furthest blocks
+        TW23.wear(out, mat, bid, face, uo, Yo, so, layer, Zo, B, cam.f, float(ss))
+        TW23.canal_wall(out, mat, Yo, so, Zo, E.Y_WATER, E.Y_FAR)
         # land-side houses behind the hedge (round 6): read as SOLID painted buildings, not a hazy ghost -
         # stronger local contrast, a touch more saturation, warmer / darker values against the pale sky
         hm = (layer == 5).astype(np.float32)
@@ -461,6 +805,11 @@ class Scene:
             xs = np.arange(Wc, dtype=np.float64) - self.emx + 0.5
             ru = (xs - cam.cx) / cam.f * cam.ca - cam.sa
             invz = np.where(ru > 1e-4, ru / u_pl, 0.0)
+            if lay == 4:
+                # round 15: cauliflower clump hedge (lit rim, cool underside, fallen petals)
+                if os.environ.get('S05_HEDGE_DUMP'):
+                    np.savez_compressed(os.environ['S05_HEDGE_DUMP'], pm=pm, r0=r0, W=W)
+                pm, r0 = HG20.repaint(pm, r0, W)          # round 20: small-leaf cauliflower heads
             self.cards.append((pm, r0, invz))
         far_mask = (layer == 0) & (mat > 0)
         m = far_mask.astype(np.float32)
@@ -554,13 +903,14 @@ class Scene:
             tr_rng = np.random.default_rng(1000 + i)
             sc = rng.uniform(0.95, 1.08)
             big_ = Z < 20
-            tree = R13.Tree13(tr_rng, scale=1.15 * sc, lean=-1.0, spread=1.25, big=Z < 45, hmul=1.1)
             ldx, ldy = sx - bx, (sy - by) * 1.0
             ln = math.hypot(ldx, ldy) + 1e-6
             wpx = W / 1920.0                      # 1080p pixel in output px
-            # round 13: branch-borne blossom clusters (s05_sakura_r13)
-            pnt = R13.Painter13(k, sun_dir=(ldx / ln, ldy / ln), dab_min=1.6 * ss * wpx, rim_px=1.6 * ss * wpx,
-                                wood_rim_px=1.6 * ss * wpx, detail=1.0 if Z < 60 else 0.8)
+            # round 16: branch skeleton carrying blossom clusters (s05_sakura_r16); cluster size kept >= a few
+            # screen px with distance
+            tree = R23.Tree23(tr_rng, scale=1.15 * sc, lean=-1.0, spread=1.2, big=Z < 45, hmul=1.3,
+                              cl=max(1.0, Z / 14.0) ** 0.7, maxd=4 if Z < 40 else 3)
+            pnt = R23.Painter23(k, sun_dir=(ldx / ln, ldy / ln), px=ss * wpx, detail=1.0 if Z < 60 else 0.6)
             card, ox, oy = pnt.paint(tree, tr_rng)
             hz = 0.72 * (1.0 - math.exp(-Z / 200.0))
             T2.haze_card(card, hz, hcol_n)
@@ -572,7 +922,7 @@ class Scene:
         self._contact_shadows(near_bases)
         self.near_bases = near_bases
         # ---- hand-painted hero branch hanging into the top-left corner (2D, nearest plane)
-        self.hero, self.hero_ox, self.hero_oy = BR.render(W, H, self.sun_xy, top=0.1 + CRANE + 0.02)
+        self.hero, self.hero_ox, self.hero_oy = BR.render(W, H, self.sun_xy, top=0.1 + CRANE + 0.02, defocus=0.0019)
         a = self.hero[..., 3:4]
         self.hero_pm = np.concatenate([self.hero[..., :3] * a, a], -1).astype(np.float32)
         # ---- far bank row: varied crowns, irregular spacing with gaps that show the town behind
@@ -590,16 +940,16 @@ class Scene:
                 k = f * ss / Z
                 tr_rng = np.random.default_rng(5000 + i)
                 # round 11: varied size / shape per tree (height, spread, clump size, lean all random)
-                tree = R13.Tree13(tr_rng, lean=float(tr_rng.choice([-1.0, 1.0], p=[0.35, 0.65])),
-                                  scale=0.9 * sc, big=False, spread=tr_rng.uniform(0.8, 1.2),
-                                  hmul=tr_rng.uniform(0.85, 1.2), density=1.5, trunk=0.72)
+                tree = R23.Tree23(tr_rng, dobuki=0.5, lean=float(tr_rng.choice([-1.0, 1.0], p=[0.35, 0.65])),
+                                  scale=0.9 * sc, big=False, spread=tr_rng.uniform(0.75, 1.2),
+                                  hmul=tr_rng.uniform(0.8, 1.2), density=1.3, trunk=0.8,
+                                  cl=max(1.0, Z / 20.0) ** 0.6, maxd=3)
                 ldx, ldy = sx - bx, sy - by
                 ln = math.hypot(ldx, ldy) + 1e-6
                 wpx = W / 1920.0
-                pnt = R13.Painter13(k, sun_dir=(ldx / ln, ldy / ln), dab_min=1.3 * ss * wpx, dab_m=0.07,
-                                    rim_px=1.3 * ss * wpx, wood_rim_px=1.0 * ss * wpx, detail=0.7, far=True)
+                pnt = R23.Painter23(k, sun_dir=(ldx / ln, ldy / ln), px=ss * wpx, detail=0.4, far=True)
                 card, ox, oy = pnt.paint(tree, tr_rng)
-                hz = 0.62 * (1.0 - math.exp(-Z / 120.0))       # round 11: stronger aerial fade with distance
+                hz = 0.5 * (1.0 - math.exp(-Z / 150.0))       # round 16: pinker far row, keep structure
                 T2.haze_card(card, hz, hcol_f)
                 rgba, x0, y0 = T2.card_to_screen(card, ox, oy, float(bx), float(by), ss)
                 self.bins_far.append(dict(rgba=rgba, ox=x0, oy=y0, z=float(Z), hero=False))
@@ -936,15 +1286,26 @@ class Scene:
         zm = 0.5 * (Z0 + Z1)
         order = np.argsort(-zm)
         sid = np.arange(len(S_), dtype=np.float64)
-        Cp = np.stack([x0, y0, r0, x1, y1, r1, S_[:, 7], sid], 1)[order].astype(np.float64)
-        RL.draw_pipes(img, Cp, np.array([0.3, 0.36, 0.58]), np.array([0.8, 0.82, 0.9]),
-                      np.array([1.15, 0.88, 0.6]), np.array([1.25, 1.1, 0.85]), np.array([0.74, 0.6, 0.55]),
-                      float(tx * 0.35))
+        # round 23: painted grey-blue steel (not white tubes), cool dark underside, warm specular only on the
+        # sun-facing top edge, weathered per-segment tone, value falloff into the air with distance
+        zf = np.clip(1.0 - np.exp(-np.maximum(zm - 4.0, 0.0) / 45.0), 0, 0.55)
+        Cp = np.stack([x0, y0, r0, x1, y1, r1, S_[:, 7], sid, zf], 1)[order].astype(np.float64)
+        RL23.draw_pipes23(img, Cp, np.array([0.24, 0.27, 0.44]), np.array([0.64, 0.67, 0.76]),
+                          np.array([1.12, 0.86, 0.6]), np.array([1.25, 1.02, 0.72]), np.array([0.62, 0.52, 0.5]),
+                          float(tx * 0.35), np.array([0.8, 0.85, 0.94]))
         return img
 
     # ================================================================== frame
+    @staticmethod
+    def _move(t):
+        """round 21: ONE eased progress for both axes (straight diagonal, no curved path) at ~60% of the old
+        speed; the end framing (sun position for the glare match cut) is unchanged."""
+        u = float(np.clip((t - CRANE_T[0]) / (CRANE_T[1] - CRANE_T[0]), 0.0, 1.0))
+        e = 0.2 * u + 0.8 * (0.5 - 0.5 * math.cos(math.pi * u))
+        return 1.0 - MOVE_SPAN * (1.0 - e)
+
     def cam_x(self, t):
-        return TRAVEL * (_ease(t / DURATION) - 0.5)
+        return TRAVEL * (self._move(t) - 0.5)
 
     def frame(self, t):
         W, H = self.W, self.H
@@ -993,31 +1354,63 @@ class Scene:
             gf = self.grass_feet.get(round(float(bn['z']), 4))
             if gf:
                 G.composite(img, gf, self.emx, gsh)
+        occ_t = occ_c.copy()                     # round 19: crown coverage (for the sun-side rim / halo)
         # ---- hand-painted foreground branch (nearest plane: largest parallax, gentle sway)
         self._hero(canvas, occ_c, t, tx)
         # ---- tilt-up: crop the frame out of the canvas (sub-pixel, eased)
         img, occ, shifts = self._crop(canvas, occ_c, D, shifts)
         sun_y = sun_y + D
+        if D >= 1e-3:
+            A_ = np.float32([[1, 0, 0], [0, 1, D - M]])
+            occ_t = cv2.warpAffine(occ_t, A_, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        else:
+            occ_t = np.ascontiguousarray(occ_t[M:])
+        self._crown_rim(img, occ_t, sun_x, sun_y)
         vis = F.sun_visibility(occ, sun_x, sun_y, 0.012 * W)
         # ---- light beams slanting from the canopy gaps down onto the path (sun-ray vanishing point = sun)
         #      + crepuscular shafts from the sun through the branch / canopy gaps (one low-res pass)
         b, sh, c1, c2 = self._beams(shifts, sun_x, sun_y, occ, D)
         lo = b[..., None] * (0.55 * c1) + sh[..., None] * ((0.5 + 0.35 * vis) * c2)
         img += cv2.resize(lo, (W, H), interpolation=cv2.INTER_LINEAR)
+        img += self._canal_shafts(sun_x, sun_y, t, vis)
+        ps_ = self._path_shafts(sun_x, sun_y, t, vis, occ)
+        img += ps_ * np.clip(1.15 - img.mean(-1, keepdims=True), 0.25, 1.0)    # screen-like: reads on the shade
         img = self._petals(img, t, tx, D)
-        img = SFX.bloom_fast(img, threshold=0.93, knee=0.28, strength=0.26, halation=0.1)
+        self._warm_grade(img)
+        img = SFX.bloom_fast(img, threshold=0.93, knee=0.28, strength=0.24, halation=0.07)
         img += self.flare.render(sun_x, sun_y, vis=0.35 + 0.65 * vis, rot=0.02 * t,
                                       center=(W / 2 - tx * 0.08 * W, H / 2))
         img = F.shoulder(img, 0.82, desat=0.2)
         img *= self.paper
         return F.finish_fast(img, t, sat=1.05, grain_amt=0.0, vig=0.2, ca=0.0005)
 
+    def _warm_grade(self, img):
+        """round 22: clear warm / cool split - sunlit path pools and the lit grass verge pick up warm gold, violet is
+        kept for the shadows only (colour grade driven by the frame itself -> temporally coherent)."""
+        W, H = self.W, self.H
+        if getattr(self, '_wg_rows', None) is None:
+            yy = np.arange(H, dtype=np.float32) / H
+            self._wg_rows = np.clip((yy - 0.66) / 0.12, 0, 1)[:, None].astype(np.float32)
+            xx = np.arange(W, dtype=np.float32) / W
+            self._wg_cols = np.clip((xx - 0.35) / 0.15, 0, 1)[None, :].astype(np.float32)
+        r, g, b = img[..., 0], img[..., 1], img[..., 2]
+        lum = (r + g + b) / 3.0
+        rows = self._wg_rows * self._wg_cols
+        # lit path pools: bright, not violet
+        viol = np.clip((b - g) / 0.12, 0, 1)
+        kp = rows * np.clip((lum - 0.55) / 0.2, 0, 1) * (1 - viol)
+        # lit grass: green-dominant and reasonably bright
+        grn = np.clip((g - np.maximum(r, b)) / 0.08, 0, 1) * np.clip((lum - 0.25) / 0.2, 0, 1)
+        kg = rows * grn
+        img[..., 0] += 0.04 * kp + 0.1 * kg
+        img[..., 1] += 0.01 * kp + 0.05 * kg
+        img[..., 2] -= 0.045 * kp + 0.03 * kg
+        # shadowed path: keep violet but less magenta-lilac (cooler blue-violet)
+        ks = rows * viol * np.clip((0.7 - lum) / 0.3, 0, 1)
+        img[..., 0] -= 0.035 * ks
+
     def crane(self, t):
-        u = np.clip((t - CRANE_T[0]) / (CRANE_T[1] - CRANE_T[0]), 0.0, 1.0)
-        # round 11: symmetric blend of linear + sine ease: the move is already drifting on the cut in and still
-        # drifting into the dissolve, with a peak speed only ~1.3x the mean (no acceleration spike)
-        u = 0.45 * float(u) + 0.55 * (0.5 - 0.5 * math.cos(math.pi * float(u)))
-        return float(CRANE * self.H * u)
+        return float(CRANE * self.H * self._move(t))
 
     def _crop(self, canvas, occ_c, D, shifts):
         W, H, M = self.W, self.H, self.M
@@ -1097,10 +1490,124 @@ class Scene:
         b = SFX.beams_toward(np.clip(src, 0, None) ** 2.2, sx / q, sy / q, length=0.5, steps=22)
         # sun shafts through the gaps of the branch / canopy, same low-res pass
         occ_q = np.clip(cv2.resize(occ, (w, h), interpolation=cv2.INTER_AREA), 0.0, 1.0)
-        sh = SFX.sun_shafts(occ_q, sx / q, sy / q, strength=0.26, length=0.85, radius=0.07)
+        sh = SFX.sun_shafts(occ_q, sx / q, sy / q, strength=0.36, length=0.9, radius=0.07)
         c1 = np.array([1.0, 0.86, 0.66], np.float32)
         c2 = np.array([1.0, 0.9, 0.78], np.float32)
         return b, sh, c1, c2
+
+    def _crown_rim(self, img, occ, sx, sy):
+        """round 19: sun-side rim glow on the blossom crowns - a near-white warm-cream rim on the crown edges
+        that face the sun (upper left) and a soft additive halo where the crown edge meets the bright sky,
+        both strongest near the sun."""
+        W, H = self.W, self.H
+        q = 2
+        w, h = W // q, H // q
+        oq = cv2.resize(occ, (w, h), interpolation=cv2.INTER_AREA)
+        if getattr(self, '_rim_grid', None) is None:
+            self._rim_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+        ys, xs = self._rim_grid
+        dx, dy = sx / q - xs, sy / q - ys
+        dn = np.sqrt(dx * dx + dy * dy) + 1e-3
+        prox = np.exp(-dn * q / (0.42 * W)).astype(np.float32)
+        lx, ly = dx / dn, dy / dn
+        # rim: coverage here, none a few px toward the sun
+        sh = 2.5 * W / 1920.0 / q
+        mx = (xs + lx * sh).astype(np.float32)
+        my = (ys + ly * sh).astype(np.float32)
+        o_s = cv2.remap(oq, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        rim = np.clip(oq - o_s, 0, 1)
+        # round 22: only the crown's OUTER sun-facing silhouette (no cream rings round every sky hole / floret)
+        sh3 = 14.0 * W / 1920.0 / q
+        ob3 = cv2.GaussianBlur(oq, (0, 0), 5.0 * W / 1920.0 / q)
+        outer = cv2.remap(ob3, (xs + lx * sh3).astype(np.float32), (ys + ly * sh3).astype(np.float32),
+                          cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        rim = rim * np.clip((0.5 - outer) / 0.35, 0, 1)
+        rim = np.clip(rim * 1.6, 0, 1) * (0.35 + 0.65 * prox)
+        # halo: outside the crown, toward the sun
+        sh2 = 10.0 * W / 1920.0 / q
+        ob = cv2.GaussianBlur(oq, (0, 0), 6.0 * W / 1920.0 / q)
+        ob_s = cv2.remap(ob, (xs - lx * sh2).astype(np.float32), (ys - ly * sh2).astype(np.float32), cv2.INTER_LINEAR,
+                         borderMode=cv2.BORDER_CONSTANT)
+        halo = np.clip(ob_s - oq, 0, 1) * prox
+        rim = cv2.resize(rim, (W, H), interpolation=cv2.INTER_LINEAR)[..., None]
+        halo = cv2.resize(halo, (W, H), interpolation=cv2.INTER_LINEAR)[..., None]
+        cream = np.array([1.12, 1.03, 0.9], np.float32)
+        img += (cream - img) * np.clip(rim * 0.35, 0, 0.45)
+        img += halo * np.array([0.34, 0.27, 0.2], np.float32)
+
+    def _path_shafts(self, sx, sy, t, vis, occ):
+        """round 20: 4 soft, broken god-rays from the upper-left sun slanting down through the canopy gaps and
+        across the path (x ~900-1500).  Painted wedges (not ray-marched): soft-edged, broken along their length
+        by slow low-frequency gaps (the canopy they pass through), strongest in the hazy air between the
+        crowns, a touch stronger where the ray crosses open (unoccluded) pixels near the crown edges, and very
+        slowly drifting.  A small warm bloom on the sun disc itself."""
+        W, H = self.W, self.H
+        q = 4
+        w, h = W // q, H // q
+        if getattr(self, '_ps_grid', None) is None:
+            self._ps_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+            rng = np.random.default_rng(2020)
+            self._ps_brk = rng.random((6, 64)).astype(np.float32)
+        ys, xs = self._ps_grid
+        X = (xs + 0.5) * q - sx
+        Y = (ys + 0.5) * q - sy
+        ang = np.degrees(np.arctan2(Y, X))
+        dist = np.sqrt(X * X + Y * Y) / W
+        acc = np.zeros((h, w), np.float32)
+        beams = ((21.5, 1.4, 0.9), (26.0, 0.8, 0.6), (31.0, 2.0, 1.0), (37.5, 1.0, 0.65), (44.5, 1.6, 0.75))
+        for j, (a0, wd, amp) in enumerate(beams):
+            a_ = a0 + 0.5 * math.sin(0.3 * t + 1.7 * j)
+            e = np.abs(ang - a_) / wd
+            core = np.clip(1.2 - e, 0, 1) ** 1.6
+            # broken along its length: interpolated random gaps (canopy passing in front of the sun)
+            brk = self._ps_brk[j]
+            pos = np.clip(dist * 9.0 + 0.05 * t + 3.0 * j, 0, 62.99)
+            i0 = np.floor(pos).astype(np.int32)
+            fr = pos - i0
+            b_ = brk[i0] * (1 - fr) + brk[i0 + 1] * fr
+            b_ = np.clip((b_ - 0.1) / 0.5, 0.3, 1.0)
+            acc += amp * core * b_
+        along = np.clip((dist - 0.15) / 0.25, 0, 1) * np.clip((1.0 - dist) / 0.4, 0, 1)
+        xn = (xs + 0.5) * q / W
+        yn = (ys + 0.5) * q / H
+        gate = np.clip((xn - 0.3) / 0.15, 0, 1) * np.clip((0.86 - xn) / 0.1, 0, 1) *             np.clip((yn - 0.12) / 0.1, 0, 1) * np.clip((0.97 - yn) / 0.15, 0, 1)
+        oq = cv2.resize(occ, (w, h), interpolation=cv2.INTER_AREA)
+        ob = cv2.GaussianBlur(oq, (0, 0), 6.0)
+        air = 0.7 + 0.5 * np.clip(ob - oq, 0, 1) * 4.0 - 0.25 * oq
+        hzn = np.clip((yn - self.cam.hy / H - 0.03) / 0.2, 0.08, 1.0) ** 1.3       # no white pile-up at the vanishing point
+        k = acc * along * gate * hzn * np.clip(air, 0.3, 1.4) * (0.5 + 0.5 * float(vis)) * 0.5     # round 22: -40%
+        col = np.array([1.0, 0.9, 0.74], np.float32)
+        lo = k[..., None] * col
+        # sun-disc bloom (warm, small)
+        d2 = (X * X + Y * Y) / (W * W)
+        lo += (0.3 * np.exp(-d2 / 0.0009) + 0.035 * np.exp(-d2 / 0.006))[..., None] *             np.array([1.0, 0.92, 0.78], np.float32) * (0.4 + 0.6 * float(vis))
+        return cv2.resize(lo.astype(np.float32), (W, H), interpolation=cv2.INTER_LINEAR)
+
+    def _canal_shafts(self, sx, sy, t, vis):
+        """round 19: painted light shafts falling from the sun across the canal - 3 straight, softly edged
+        wedges (a painted, not ray-marched look), strongest in the hazy air low over the water, fading toward
+        the sun and at the frame bottom; they drift very slowly (temporally smooth)."""
+        W, H = self.W, self.H
+        q = 4
+        w, h = W // q, H // q
+        ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+        X = (xs + 0.5) * q - sx
+        Y = (ys + 0.5) * q - sy
+        ang = np.degrees(np.arctan2(Y, X))
+        dist = np.sqrt(X * X + Y * Y) / W
+        acc = np.zeros((h, w), np.float32)
+        for a0, wd, amp in ((58.0, 2.2, 1.0), (66.5, 1.2, 0.7), (74.0, 3.0, 0.8), (81.0, 1.4, 0.5)):
+            a_ = a0 + 0.6 * math.sin(0.35 * t + a0)
+            e = np.abs(ang - a_) / wd
+            acc += amp * np.clip(1.25 - e, 0, 1) ** 1.5
+        # along the beam: off near the sun (lost in the glare), strongest over the canal, fading at the bottom
+        along = np.clip((dist - 0.18) / 0.2, 0, 1) * np.clip((1.05 - dist) / 0.4, 0, 1)
+        yy = (ys + 0.5) * q / H
+        gate = np.clip((yy - 0.45) / 0.12, 0, 1) * np.clip((1.0 - yy) / 0.25, 0, 1)
+        xg = np.clip((0.62 - (xs + 0.5) * q / W) / 0.15, 0, 1)            # over the canal / left bank only
+        k = acc * along * (0.35 + 0.65 * gate) * xg * (0.45 + 0.55 * float(vis)) * 0.12
+        col = np.array([1.0, 0.88, 0.7], np.float32)
+        return cv2.resize((k[..., None] * col).astype(np.float32), (W, H), interpolation=cv2.INTER_LINEAR)
 
     def _sky(self, t, tx):
         """sky + drifting clouds, rendered only down to just below the horizon (the rest is always covered)"""
@@ -1130,6 +1637,14 @@ class Scene:
                      inten=1.6 * k[m] ** 0.5 * self._rail_in[m], t=t, seed=5, out=img)
 
     def _water_sparkles(self, img, t, tx):
+        if getattr(self, '_wg_y', None) is not None:
+            f_ = self.cam.f
+            xg_ = self._wg_x - self.emx - f_ * tx * self.far_invz[self._wg_y, self._wg_x]
+            xi_ = np.clip(xg_.astype(int), 0, self.W - 1)
+            px_ = img[self._wg_y, xi_]
+            ok_ = ((px_[:, 0] - px_[:, 1]) < 0.12) & (xg_ > 0) & (xg_ < self.W)      # not behind a blossom
+            SFX.sparkles(self.W, self.H, xg_.astype(np.float64), self._wg_y.astype(np.float64), size=self._wg_sz,
+                         inten=self._wg_in * 0.9 * ok_, t=t, seed=19, out=img)
         f = self.cam.f
         W, H = self.W, self.H
         # warm sheen column, moved with the water plate's parallax (per-row shift)

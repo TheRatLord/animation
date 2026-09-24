@@ -20,12 +20,12 @@ from numba import njit, prange
 
 # building record columns
 (BX0, BX1, BZ0, BZ1, BH, MAT, SEED, AR, AG, AB, FLH, BAYW, WWF, WHF, LIT0, LITADD, LITCOL, GLASS, BASE,
- GRP, SIGN, RUNF, ROOFT, CROWN, PAL) = range(25)
-NB = 25
+ GRP, SIGN, RUNF, ROOFT, CROWN, PAL, RK, RS) = range(27)
+NB = 27
 R_TX = 24.0     # texels per text line / char cell in the text atlases (s03_city_dusk_text.R)
 
 # materials
-M_CONC, M_GLASS, M_APT, M_BILL, M_FINS, M_BAND, M_DARK, M_FENCE, M_PLAIN, M_TANK, M_CURTAIN, M_NAME = range(12)
+M_CONC, M_GLASS, M_APT, M_BILL, M_FINS, M_BAND, M_DARK, M_FENCE, M_PLAIN, M_TANK, M_CURTAIN, M_NAME, M_ROAD = range(13)
 
 
 @njit(cache=True, inline='always')
@@ -88,6 +88,54 @@ def _glass_refl(u, vb, seed, fl, ci):
     return max(_sstep(0.66, 0.72, c) * up, big * _sstep(20.0, 90.0, vb)) *         (0.75 + 0.25 * _hash(seed, int(fl) // 3, int(ci) // 2, 62))
 
 
+@njit(cache=True, inline='always')
+def _weather(u, v, hb, fu, seed):
+    """round 14: painted value variation inside a facade (multiplier ~0.8..1.15): rain / grime streaks running
+    down from the parapet and from some window sills (vertical, soft-ended, varied per column), broad painted
+    light / dark patches, a lighter coping band along the top floor. Faded out where the pixel footprint is
+    wider than a streak (no speckle at a distance)."""
+    k = _sstep(2.4, 0.5, fu)
+    cw = 1.3 + 0.9 * _hash(seed, 3, 5, 700)
+    c = int(math.floor(u / cw))
+    sv = _hash(seed, c, 0, 701)
+    L = 4.0 + 26.0 * _hash(seed, c, 1, 702)
+    depth = hb - v
+    st = 0.0
+    if sv < 0.42:
+        st = (0.07 + 0.12 * _hash(seed, c, 2, 703)) * math.exp(-max(depth, 0.0) / L)
+        # soft streak edges (a painted stroke, not a hard stripe)
+        fr = u / cw - c
+        st *= _sstep(0.0, 0.3, fr) * _sstep(1.0, 0.7, fr)
+    # a second, fainter set of short streaks under random floors
+    c2 = int(math.floor(u / (cw * 0.7)))
+    f2 = int(math.floor(v / 11.0))
+    if _hash(seed, c2, f2, 704) < 0.18:
+        st += 0.06 * _sstep(11.0, 2.0, v - f2 * 11.0) * _sstep(11.0, 8.0, v - f2 * 11.0 + 3.0)
+    m = 1.0 - st * k
+    # broad painted patches (low frequency, always on)
+    m *= 1.0 + 0.055 * math.sin(u * 0.11 + seed * 0.7) * math.sin(v * 0.045 + seed * 0.31)         + 0.035 * math.sin(u * 0.037 - v * 0.021 + seed)
+    # lighter coping / top-floor band catching the sky
+    m *= 1.0 + 0.14 * _sstep(4.5, 3.0, depth) * _sstep(0.0, 0.4, depth)
+    return m
+
+
+@njit(cache=True, inline='always')
+def _slant_depth(rs, z0, z1, hb, base):
+    """depth (m) of the street-slant roof plane of a RK=1 building"""
+    return min(0.45 * (z1 - z0), 0.35 * (hb - base) / max(rs, 0.05))
+
+
+@njit(cache=True, inline='always')
+def _roof_top(rk, rs, x0, x1, z0, z1, hb, base, X, Z):
+    """round 11: local roof height of a pitched / slanted roof at (X, Z)"""
+    if rk == 1:
+        dsl = _slant_depth(rs, z0, z1, hb, base)
+        return hb - rs * max(z0 + dsl - Z, 0.0)
+    if rk == 2:
+        return hb - rs * abs(Z - 0.5 * (z0 + z1))
+    return hb - rs * abs(X - 0.5 * (x0 + x1))
+
+
 @njit(cache=True)
 def _fence_gap(u, v, hb, fu):
     """True where a fence / lattice face is see-through (posts every 1.8 m, top + mid rail)."""
@@ -142,10 +190,18 @@ def _facade(u, v, fu, fv, B, face, z, out, HA, HN, NA, NN):
     out[3], out[4], out[5], out[6], out[7] = 0.0, 0.0, 0.0, 0.0, 0.0
     hv = min(max((v + B[BASE]) / 200.0, 0.0), 1.0)
     # ---- ambient light per face
-    if face == 0:      # facing camera (east): cool teal-blue sky ambient
-        lr, lg, lb = 0.12 + 0.05 * hv, 0.14 + 0.06 * hv, 0.24 + 0.08 * hv
-    elif face == 1:    # facing the afterglow: warm
-        lr, lg, lb = 0.40 + 0.2 * hv, 0.24 + 0.08 * hv, 0.28 + 0.03 * hv
+    if face == 0:      # facing camera (east): cool sky ambient (round 13: more neutral, materials read)
+        lr, lg, lb = 0.23 + 0.05 * hv, 0.22 + 0.06 * hv, 0.245 + 0.08 * hv
+        if mat == M_CONC or mat == M_APT or mat == M_PLAIN or mat == M_TANK:
+            # round 13: real material colours (beige tile, grey concrete, brown brick, white panel) carry
+            # through the shade: push the albedo away from its grey
+            am_ = (ar + ag + ab) / 3.0
+            ar, ag, ab = am_ + (ar - am_) * 1.7, am_ + (ag - am_) * 1.7, am_ + (ab - am_) * 1.7
+    elif face == 1:    # facing the afterglow: grazing gold sun, the lower floors in the neighbours' shade
+        ks_ = _sstep(0.0, 1.0, v / max(B[BH] - B[BASE], 1.0)) ** 0.7
+        lr = 0.3 + 0.62 * ks_ + 0.2 * hv
+        lg = 0.2 + 0.34 * ks_ + 0.08 * hv
+        lb = 0.24 + 0.1 * ks_ + 0.03 * hv
     else:              # facing away: deep blue
         lr, lg, lb = 0.05, 0.065, 0.16
     # ground occlusion near the base, sodium street glow washing up the lowest floors
@@ -200,12 +256,14 @@ def _facade(u, v, fu, fv, B, face, z, out, HA, HN, NA, NN):
                 tx = (um - ucm) / sc + 0.5 * HA.shape[3]
                 if ty >= 0.0 and ty <= R_TX:
                     g2 = _tex(HA, e2, ty, tx, fu / sc)
+                    leg = _sstep(5.0, 8.5, lh / max(2.0 * fu, 1e-6))
+                    g2 = g2 * leg + 0.2 * (1.0 - leg)
                     m2 = max(m2, g2 * (1.0 if ln == 0 else 0.9))
         cr, cg, cb = br * (1 - m2) + ar2 * m2, bg * (1 - m2) + ag2 * m2, bb2 * (1 - m2) + ab2 * m2
         lit = B[LIT0]
         out[0], out[1], out[2] = cr * 0.35, cg * 0.3, cb * 0.35
         if lit > 0.5:
-            li = 0.8 * (0.9 + 0.2 * vv)
+            li = 0.5 * (0.9 + 0.2 * vv)
             out[3], out[4], out[5] = cr * li, cg * li, cb * li
             out[6] = -10.0
             out[7] = 1.0
@@ -243,6 +301,10 @@ def _facade(u, v, fu, fv, B, face, z, out, HA, HN, NA, NN):
         g = 0.0
         if ty >= 0.0 and ty <= R_TX:
             g = min(_tex(NA, ent, ty, tx, fu / sc) * 1.1, 1.0)
+        # round 14: glyphs under ~8 output px are not drawn as (pseudo-)text: the board melts into its lit
+        # panel colour (bands are rendered at 2x: fu is half an output pixel)
+        leg = _sstep(5.0, 8.5, sc * R_TX * 0.78 / max(2.0 * fu, 1e-6))
+        g = g * leg + 0.2 * (1.0 - leg)
         cr, cg, cb = br * (1 - g) + ar2 * g, bg * (1 - g) + ag2 * g, bb2 * (1 - g) + ab2 * g
         out[0], out[1], out[2] = cr * 0.3, cg * 0.28, cb * 0.33
         if B[LIT0] > 0.5:
@@ -253,6 +315,21 @@ def _facade(u, v, fu, fv, B, face, z, out, HA, HN, NA, NN):
             out[3], out[4], out[5] = cr * li, cg * li, cb * li
             out[6] = -10.0
             out[7] = 1.0
+        return
+    if mat == M_ROAD:
+        # round 12: elevated expressway girder: dark concrete box girder, a pale sound-barrier panel band
+        # along the top, a thin line of light under the deck lip
+        hbr = hb
+        bar = _sstep(hbr * 0.55 - fv, hbr * 0.55 + fv, v)
+        lip = _pulse(v - hbr * 0.5, fv, 1e6, 0.0, 0.25)
+        k_ = 0.75 + 0.75 * bar
+        out[0], out[1], out[2] = wr * k_ + 0.06 * lip, wg * k_ + 0.05 * lip, wb * k_ + 0.05 * lip
+        if face == 0 or face == 1:
+            pj = _pulse(u, fu, 2.0, 0.0, 0.12) * bar
+            out[0], out[1], out[2] = out[0] * (1 - 0.25 * pj), out[1] * (1 - 0.25 * pj), out[2] * (1 - 0.2 * pj)
+        out[3], out[4], out[5] = 0.5 * lip, 0.32 * lip, 0.15 * lip
+        out[6] = -10.0
+        out[7] = lip
         return
     if mat == M_PLAIN or mat == M_TANK or mat == M_FENCE:
         # rooftop machinery / stair housing / water tank / fence: plain painted forms
@@ -291,8 +368,10 @@ def _facade(u, v, fu, fv, B, face, z, out, HA, HN, NA, NN):
             # vertical specular streaks
             sp0 = 0.12 + 0.25 * _hash(seed, 4, 5, 6)
             sw_ = 0.07 + 0.05 * _hash(seed, 7, 8, 9)
-            st = math.exp(-((uu - sp0) / sw_) ** 2) * (0.35 + 0.65 * q)
-            st2 = math.exp(-((uu - sp0 - 0.16) / 0.012) ** 2) * (0.3 + 0.7 * q)
+            # round 12: the vertical specular streak only on a few curtain walls (it was on every one)
+            kst = 1.0 if _hash(seed, 4, 4, 4) < 0.25 else 0.0
+            st = math.exp(-((uu - sp0) / sw_) ** 2) * (0.35 + 0.65 * q) * kst
+            st2 = math.exp(-((uu - sp0 - 0.16) / 0.012) ** 2) * (0.3 + 0.7 * q) * kst
             gr += 0.9 * st + 0.9 * st2
             gg += 0.55 * st + 0.62 * st2
             gb += 0.35 * st + 0.45 * st2
@@ -393,15 +472,33 @@ def _facade(u, v, fu, fv, B, face, z, out, HA, HN, NA, NN):
             # east-facing glass mirrors the eastern dusk sky: dark blue earth shadow low, the pink belt of
             # Venus in the middle, violet above (mapped along the building's own height)
             q = min(max(v / max(hb, 1.0), 0.0), 1.0)
+            # round 13: lighter, sky-coloured and varied per building (teal / neutral / warm tinted glass)
             if q < 0.5:
-                gr, gg, gb = _lerp3(0.04, 0.07, 0.16, 0.1, 0.13, 0.28, q / 0.5)
+                gr, gg, gb = _lerp3(0.14, 0.15, 0.2, 0.2, 0.25, 0.36, q / 0.5)
             elif q < 0.72:
-                gr, gg, gb = _lerp3(0.1, 0.13, 0.28, 0.36, 0.22, 0.38, (q - 0.5) / 0.22)
+                gr, gg, gb = _lerp3(0.2, 0.25, 0.36, 0.42, 0.32, 0.44, (q - 0.5) / 0.22)
             else:
-                gr, gg, gb = _lerp3(0.36, 0.22, 0.38, 0.16, 0.17, 0.38, (q - 0.72) / 0.28)
+                gr, gg, gb = _lerp3(0.42, 0.32, 0.44, 0.36, 0.38, 0.54, (q - 0.72) / 0.28)
+            ht3 = _hash(seed, 21, 23, 29)
+            if ht3 < 0.35:
+                gr, gg, gb = gr * 0.8, gg * 1.08, gb * 1.05
+            elif ht3 < 0.6:
+                gr, gg, gb = gr * 1.2, gg * 1.02, gb * 0.8
+            vk3 = 0.75 + 0.5 * _hash(seed, 31, 37, 41)
+            gr, gg, gb = gr * vk3, gg * vk3, gb * vk3
         else:
-            k = _sstep(40.0, 320.0, vb)
-            gr, gg, gb = 0.05 + 0.12 * k, 0.08 + 0.12 * k, 0.16 + 0.2 * k
+            k = _sstep(10.0, 120.0, vb)
+            hsk = _hash(seed, 13, 1, 3)
+            gr, gg, gb = 0.11 + 0.1 * k + 0.05 * hsk, 0.12 + 0.1 * k + 0.04 * hsk, 0.22 + 0.12 * k
+            # round 13: not every pane mirrors the blue sky - drawn curtains / blinds (pale warm greys),
+            # frosted glass, darker open panes; varied per window (whole floors of one tenant often match)
+            hw_ = _hash(seed, int(math.floor(v / B[FLH])), int(math.floor(u / (B[BAYW] * 2.0))), 613)
+            if hw_ < 0.3:
+                gr, gg, gb = 0.3 + 0.08 * hsk, 0.27 + 0.06 * hsk, 0.25
+            elif hw_ < 0.42:
+                gr, gg, gb = 0.24, 0.26, 0.28
+            elif hw_ < 0.55:
+                gr, gg, gb = 0.06, 0.07, 0.11
     elif face == 1:
         gr, gg, gb = _sky_mirror(vb)
         # the pink-gold cumulus / cloud streaks reflected as big soft shapes across the west glass
@@ -455,6 +552,9 @@ def _facade(u, v, fu, fv, B, face, z, out, HA, HN, NA, NN):
     elif mat == M_BAND:
         # light tile spandrels between the ribbon windows
         wr, wg, wb = wr * 1.35, wg * 1.3, wb * 1.25
+    if face != 2 and mat != M_TANK:
+        wz_ = _weather(u, v, hb, fu, seed)
+        wr, wg, wb = wr * wz_, wg * wz_, wb * wz_ * (0.97 + 0.03 * wz_)
     if (mat == M_GLASS or mat == M_DARK) and (int(fl) % 12) == 11:
         wm = 0.0
         wr, wg, wb = wr * 0.7, wg * 0.7, wb * 0.75
@@ -647,6 +747,8 @@ def _sign(u, v, fu, B, x0, x1, hb, out, VA, VN):
     tx = (u - us - 0.5 * sw) / sc + 0.5 * R_TX
     g = _tex(VA, idx, ty, tx, fu / sc) if ty < n * R_TX else 0.0
     g = min(g * 1.15, 1.0)
+    leg = _sstep(5.0, 8.5, cell / max(2.0 * fu, 1e-6))      # round 14: no pseudo-text at tiny sizes
+    g = g * leg + 0.2 * (1.0 - leg)
     li = 1.0 + 0.2 * _hash(sgn, 5, 5, 5)
     rr = br * (1 - g) + cr * g
     rg = bg_ * (1 - g) + cg * g
@@ -671,56 +773,35 @@ def _sign(u, v, fu, B, x0, x1, hb, out, VA, VN):
 # afterglow and mirrors hot gold.
 
 # palette table: frame rgb, glass tint rgb, reflectivity, spandrel frac, mullion w (m), pier every n bays (0 none),
-# pier w (m), corner return w (bays), punched (0 curtain / 1 punched stone)
+# pier w (m), corner return w (bays), punched (0 curtain / 1 punched precast / stone)
 PALS = np.array([
-    # frame               tint                refl  spf   mul   np   pw    cw   punched
-    [0.30, 0.36, 0.48, 0.55, 0.72, 1.00, 0.92, 0.16, 0.10, 0.0, 0.0, 0.0, 0.0],   # 0 blue curtain wall
-    [0.86, 0.87, 0.92, 0.52, 0.62, 0.82, 0.70, 0.40, 0.30, 0.0, 0.0, 1.0, 0.0],   # 1 white aluminium grid
-    [0.26, 0.38, 0.40, 0.42, 0.86, 0.84, 0.90, 0.20, 0.14, 4.0, 0.5, 0.0, 0.0],   # 2 teal-green glass
-    [0.82, 0.70, 0.58, 0.58, 0.58, 0.66, 0.55, 0.48, 0.55, 3.0, 0.7, 1.0, 1.0],   # 3 beige stone, punched
-    [0.13, 0.13, 0.17, 0.44, 0.48, 0.62, 0.80, 0.26, 0.20, 0.0, 0.0, 0.5, 0.0],   # 4 dark granite / smoked
-    [0.34, 0.26, 0.22, 0.92, 0.70, 0.52, 0.88, 0.22, 0.14, 6.0, 0.4, 0.0, 0.0],   # 5 bronze glass
-    [0.64, 0.66, 0.72, 0.52, 0.64, 0.86, 0.80, 0.12, 0.42, 1.0, 0.42, 1.0, 0.0],  # 6 silver vertical fins
-    [0.70, 0.62, 0.66, 0.56, 0.60, 0.78, 0.62, 0.52, 0.45, 2.0, 0.5, 1.0, 1.0],   # 7 pale rose tile, punched
+    # frame               tint                refl  spf   mul   np   pw    cw   punched style
+    [0.30, 0.36, 0.48, 0.55, 0.72, 1.00, 0.92, 0.14, 0.12, 0.0, 0.0, 0.0, 0.0, 0.0],   # 0 blue curtain wall
+    [0.86, 0.87, 0.92, 0.52, 0.62, 0.82, 0.70, 0.30, 0.30, 0.0, 0.0, 1.0, 0.0, 0.0],   # 1 white aluminium grid
+    [0.26, 0.38, 0.40, 0.42, 0.86, 0.84, 0.90, 0.16, 0.14, 4.0, 0.5, 0.0, 0.0, 0.0],   # 2 teal-green glass
+    [0.80, 0.76, 0.70, 0.50, 0.58, 0.70, 0.50, 0.50, 0.60, 3.0, 0.7, 1.0, 1.0, 0.0],   # 3 precast concrete, punched
+    [0.11, 0.11, 0.14, 0.36, 0.38, 0.50, 0.85, 0.12, 0.10, 0.0, 0.0, 0.5, 0.0, 0.0],   # 4 dark smoked glass
+    [0.34, 0.26, 0.22, 0.92, 0.70, 0.52, 0.88, 0.18, 0.14, 6.0, 0.4, 0.0, 0.0, 0.0],   # 5 bronze glass
+    [0.64, 0.66, 0.72, 0.52, 0.64, 0.86, 0.80, 0.12, 0.42, 1.0, 0.42, 1.0, 0.0, 0.0],  # 6 silver vertical fins
+    [0.74, 0.62, 0.58, 0.56, 0.60, 0.78, 0.62, 0.52, 0.45, 2.0, 0.5, 1.0, 1.0, 0.0],   # 7 warm rose stone, punched
+    [0.72, 0.78, 0.88, 0.70, 0.88, 1.06, 0.95, 0.12, 0.12, 0.0, 0.0, 0.5, 0.0, 0.0],   # 8 pale blue curtain wall
+    [1.00, 0.80, 0.56, 0.52, 0.56, 0.70, 0.45, 0.50, 0.60, 2.0, 0.8, 1.0, 1.0, 0.0],   # 9 warm tan / beige stone
+    [1.00, 1.00, 1.00, 0.46, 0.52, 0.66, 0.40, 0.50, 0.50, 0.0, 0.0, 1.0, 0.0, 1.0],   # 10 white-panel residential
+    [0.10, 0.19, 0.22, 0.46, 0.80, 0.86, 0.96, 0.10, 0.10, 0.0, 0.0, 0.0, 0.0, 0.0],   # 11 dark blue-green glass
+    [0.80, 0.40, 0.28, 0.50, 0.52, 0.66, 0.42, 0.50, 0.55, 2.0, 0.7, 1.0, 1.0, 0.0],   # 12 warm red-brown brick, punched
 ])
-NPAL = 8
-
-
-@njit(cache=True, inline='always')
-def _skyrefl(s, face, br):
-    """reflected sky / hazy horizon colour at reflected elevation s (0 = horizon, + up, - down)"""
-    if face == 1:
-        # the afterglow side: hot gold at the horizon, orange then rose-violet higher up
-        if s >= 0.0:
-            if s < 0.6:
-                r, g, b = _lerp3(1.45, 0.86, 0.40, 1.15, 0.52, 0.34, s / 0.6)
-            elif s < 2.0:
-                r, g, b = _lerp3(1.15, 0.52, 0.34, 0.62, 0.36, 0.52, (s - 0.6) / 1.4)
-            else:
-                r, g, b = 0.62, 0.36, 0.52
-        else:
-            # below the horizon: the backlit city through the haze, glowing near the horizon
-            k = math.exp(s * 1.6)
-            r, g, b = _lerp3(0.16, 0.10, 0.16, 1.0, 0.58, 0.36, k)
-    else:
-        # the eastern dusk sky behind the camera: pink-lavender belt of Venus low, cool blue above
-        if s >= 0.0:
-            if s < 0.7:
-                r, g, b = _lerp3(0.58, 0.50, 0.66, 0.40, 0.46, 0.72, s / 0.7)
-            elif s < 2.4:
-                r, g, b = _lerp3(0.40, 0.46, 0.72, 0.20, 0.27, 0.56, (s - 0.7) / 1.7)
-            else:
-                r, g, b = 0.20, 0.27, 0.56
-        else:
-            k = math.exp(s * 1.4)
-            r, g, b = _lerp3(0.07, 0.08, 0.15, 0.40, 0.38, 0.55, k)
-    return r * br, g * br, b * br
+NPAL = 13
 
 
 @njit(cache=True)
 def _tower(u, v, fu, fv, B, face, z, cam_h, sunx, out):
-    """Painted high-rise facade (see above). u, v face coords (m), fu, fv pixel footprint (m).
-    Writes out[0:3] colour, out[3:6] emission, out[6] on-time, out[7] emission weight."""
+    """Round 11: painted high-rise facade. u, v face coords (m), fu, fv pixel footprint (m).
+    Lighting logic for a low sun straight ahead: the camera-facing face (0) is in shadow and mirrors the cool
+    eastern sky (lilac high -> dusk blue -> a dusty warm band low); the -x face (1) is grazed by the sun and
+    mirrors hot gold (gold low -> apricot -> rose-lilac high); towers close to the sun in screen space are
+    backlit silhouettes (dark, desaturated, cool). Structure: continuous vertical mullions, thin spandrel bands,
+    piers / corner returns / mechanical floors, window-cleaning gondola rails under the parapet, a warm stone
+    lobby. Writes out[0:3] colour, out[3:6] emission, out[6] on-time, out[7] emission weight."""
     seed = int(B[SEED])
     pal = ((int(B[PAL]) - 1) % 16) % NPAL
     P = PALS[pal]
@@ -730,160 +811,306 @@ def _tower(u, v, fu, fv, B, face, z, cam_h, sunx, out):
     wdt = max(wdt, 1.0)
     flh = B[FLH]
     bay = B[BAYW]
-    if pal == 3 or pal == 7:
+    punched = P[12] > 0.5
+    if punched:
         bay = max(bay, 2.6)
     tseed = int(B[PAL]) // 16                        # tower id: shared by all tiers of one tower
-    # ---- face lighting (painted): shadow face cool, afterglow face warm, far face deep blue
-    hv = min(max(vb / 260.0, 0.0), 1.0)
-    if face == 0:
-        lr, lg, lb = 0.30 + 0.10 * hv, 0.33 + 0.10 * hv, 0.50 + 0.12 * hv
-    elif face == 1:
-        lr, lg, lb = 0.95 + 0.35 * hv, 0.58 + 0.16 * hv, 0.42 + 0.06 * hv
+    xc = 0.5 * (B[BX0] + B[BX1])
+    zc = max(0.5 * (B[BZ0] + B[BZ1]), 1.0)
+    ds = abs(xc / zc - sunx) * 2.2                   # screen distance to the sun (fraction of W)
+    # round 13: towers left of the sun turn their +x face toward the afterglow: paint it as the lit face
+    lside = xc / zc < sunx
+    face0 = face
+    if face == 2 and lside:
+        face = 1
+    bl = _sstep(0.34, 0.12, ds)                      # 1 = backlit silhouette
+    hv = min(max(vb / 300.0, 0.0), 1.0)
+    q = min(max(v / max(hb, 1.0), 0.0), 1.0)
+    uu = min(max(u / wdt, 0.0), 1.0)
+    # ---- reflected sky (painted)
+    if face == 1:
+        if hv < 0.5:
+            sr, sg, sb = _lerp3(1.5, 0.92, 0.42, 1.28, 0.62, 0.4, hv / 0.5)
+        else:
+            sr, sg, sb = _lerp3(1.28, 0.62, 0.4, 0.82, 0.5, 0.68, (hv - 0.5) / 0.5)
+        # hottest toward the sunward (far) edge
+        kx = 0.72 + 0.5 * uu
+        sr, sg, sb = sr * kx, sg * kx, sb * (0.85 + 0.25 * uu)
+    elif face == 0:
+        # round 13: sky-coloured vertical glass gradient on every tower: warm dusty apricot at the base
+        # (the lit haze over the city), violet-blue mid, pink-lilac at the top (the upper dusk sky)
+        if hv < 0.3:
+            sr, sg, sb = _lerp3(0.62, 0.38, 0.32, 0.3, 0.27, 0.46, hv / 0.3)
+        elif hv < 0.7:
+            sr, sg, sb = _lerp3(0.3, 0.27, 0.46, 0.46, 0.36, 0.62, (hv - 0.3) / 0.4)
+        else:
+            sr, sg, sb = _lerp3(0.46, 0.36, 0.62, 0.7, 0.5, 0.74, (hv - 0.7) / 0.3)
+        tv = 0.8 + 0.4 * _hash(tseed, 5, 7, 423)          # per-tower value
+        sr, sg, sb = sr * tv, sg * tv, sb * tv
     else:
-        lr, lg, lb = 0.10, 0.12, 0.24
-    ab = (B[AR] + B[AG] + B[AB]) / 3.0
-    vk = 0.85 + 0.3 * (ab - 0.85)                          # per-tower value
-    fr_, fg_, fb_ = P[0] * lr * vk, P[1] * lg * vk, P[2] * lb * vk
-    # ---- reflected elevation, per mirror panel tilt
-    pf = 2 + (tseed % 2)                                    # floors per panel
-    pb = 1 + (tseed // 3) % 3                               # bays per panel
+        sr, sg, sb = 0.07, 0.08, 0.16
+    # one broad painted sheen across the face (not a flat tint)
+    sh = 0.5 + 0.5 * math.sin(3.0 * (uu * 0.8 + q * 1.3) + tseed * 1.7)
+    sk_ = 0.88 + 0.24 * sh
+    sr, sg, sb = sr * sk_, sg * sk_, sb * sk_
+    # per mirror panel tilt: the reflection steps from panel to panel
+    pf = 2 + (tseed % 2)
+    pb = 1 + (tseed // 3) % 3
     pfl = math.floor(v / (flh * pf))
     pcl = math.floor(u / (bay * pb))
-    jit = (_hash(seed, int(pfl), int(pcl), 401) - 0.5)
-    jamp = 0.55 * _sstep(bay * pb * 1.2, bay * pb * 0.4, fu)  # fades when a panel shrinks below a pixel
-    s = (cam_h - vb) / max(z, 1.0) * 40.0
-    s += 0.35 * math.sin(u * 0.045 + tseed * 0.7) + 0.2 * math.sin(u * 0.13 - v * 0.02 + tseed)
-    s += jit * jamp
-    # reflected skyline of the city behind the camera: a jagged darker band just above the horizon
-    sk = 0.25 + 0.3 * _hash(tseed, int(math.floor(u / 9.0)), 0, 403) + 0.25 * math.sin(u * 0.021 + tseed)
-    br = 0.92 + 0.16 * _hash(seed, int(pfl), int(pcl), 402) * (jamp / 0.55)
-    gr, gg, gb = _skyrefl(s, face, br)
-    if s < sk and s > -1.5:
-        m = _sstep(sk, sk - 0.08, s)
-        if face == 1:
-            cr_, cg_, cb_ = 0.34, 0.18, 0.2
+    jamp = _sstep(bay * pb * 1.2, bay * pb * 0.4, fu)
+    jit = (_hash(seed, int(pfl), int(pcl), 401) - 0.5) * 0.07 * jamp
+    sr, sg, sb = sr * (1 + jit), sg * (1 + jit), sb * (1 + jit * 0.7)
+    # round 12: painted sky / cumulus reflections on a few hero towers (RS = 1 + variant). Each tower mirrors a
+    # different part of the sky: a peach cumulus flank, the violet-blue upper sky, gold afterglow, teal ->
+    # peach; each with its own gradient direction, broken per mirror panel, with big soft cloud lobes.
+    if B[RS] > 0.5 and face != 2:
+        var = int(B[RS] - 1.0 + 0.5) % 4
+        off = (_hash(seed, int(pfl), int(pcl), 411) - 0.5) * jamp
+        ang = (0.1 + 0.8 * _hash(tseed, 12, 5, 431)) * math.pi
+        gc = math.cos(ang) * (uu - 0.5) * 0.6 + math.sin(ang) * (0.5 - q) + 0.5 + 0.04 * off
+        if var == 0:
+            ar_, ag_, ab_, br_, bg_, bb_ = 1.3, 0.8, 0.62, 0.5, 0.44, 0.82
+            cr_, cg_, cb_ = 1.55, 1.08, 0.86
+        elif var == 1:
+            ar_, ag_, ab_, br_, bg_, bb_ = 0.3, 0.38, 0.92, 0.72, 0.84, 1.1
+            cr_, cg_, cb_ = 0.95, 0.98, 1.2
+        elif var == 2:
+            ar_, ag_, ab_, br_, bg_, bb_ = 1.45, 0.92, 0.5, 0.9, 0.46, 0.62
+            cr_, cg_, cb_ = 1.6, 1.2, 0.75
         else:
-            cr_, cg_, cb_ = 0.12, 0.12, 0.22
-        gr, gg, gb = gr * (1 - 0.45 * m) + cr_ * 0.45 * m, gg * (1 - 0.45 * m) + cg_ * 0.45 * m, gb * (1 - 0.45 * m) + cb_ * 0.45 * m
-    # reflected cloud masses (soft, large) on the shadow face
-    if face == 0:
-        c = 0.5 + 0.3 * math.sin(u * 0.03 + vb * 0.012 + tseed) + 0.25 * math.sin(u * 0.011 - vb * 0.02 + tseed * 1.3)
-        cm = _sstep(0.62, 0.72, c) * _sstep(-0.2, 0.8, s)
-        gr, gg, gb = gr + 0.16 * cm, gg + 0.1 * cm, gb + 0.12 * cm
+            ar_, ag_, ab_, br_, bg_, bb_ = 0.24, 0.55, 0.7, 1.2, 0.76, 0.64
+            cr_, cg_, cb_ = 1.4, 1.02, 0.86
+        tg = _sstep(0.15, 0.9, gc)
+        rr_ = ar_ + (br_ - ar_) * tg
+        rg_ = ag_ + (bg_ - ag_) * tg
+        rb_ = ab_ + (bb_ - ab_) * tg
+        # big soft cumulus lobes crossing the face along the gradient direction (firm upper edge)
+        dg = (math.cos(ang + 1.2) * u * 0.8 + math.sin(ang + 1.2) * vb) + off * 5.0
+        cfld = 0.5 + 0.3 * math.sin(dg * 0.045 + tseed * 1.3) + 0.2 * math.sin(dg * 0.11 - u * 0.03 + tseed)
+        cm_ = _sstep(0.58, 0.66, cfld) * _sstep(0.1, 0.4, q)
+        km = 0.82 if face == 0 else 0.62
+        # round 14: every variant carries the dusk sky's own vertical gradient too: lilac high, peach low
+        if q > 0.55:
+            lr2, lg2, lb2 = _lerp3(1.0, 0.72, 0.9, 0.78, 0.66, 1.08, (q - 0.55) / 0.45)
+        else:
+            lr2, lg2, lb2 = _lerp3(1.45, 0.86, 0.6, 1.0, 0.72, 0.9, q / 0.55)
+        rr_ = rr_ * 0.55 + lr2 * 0.45
+        rg_ = rg_ * 0.55 + lg2 * 0.45
+        rb_ = rb_ * 0.55 + lb2 * 0.45
+        sr = sr * (1 - km) + rr_ * km
+        sg = sg * (1 - km) + rg_ * km
+        sb = sb * (1 - km) + rb_ * km
+        sr = sr * (1 - 0.6 * cm_) + cr_ * 0.6 * cm_
+        sg = sg * (1 - 0.6 * cm_) + cg_ * 0.6 * cm_
+        sb = sb * (1 - 0.6 * cm_) + cb_ * 0.6 * cm_
+    # the afterglow caught on the sunward part of the shadow-face glass of the side towers (a diagonal gold
+    # wedge, as the glass of a slightly angled curtain wall picks up the sun), only on some towers
+    if face == 0 and not punched:
+        sidep = 1.0 if xc / zc > sunx else -1.0
+        us = uu if sidep > 0 else 1.0 - uu
+        gs = _hash(tseed, 3, 3, 421)
+        gs = 0.0 if gs < 0.8 else 0.35
+        wedge = math.exp(-max(us + 0.45 * (1.0 - q) - 0.05, 0.0) / 0.22)
+        gold = wedge * _sstep(0.15, 0.75, q) * (1.0 - bl) * gs
+        sr = sr * (1 - 0.7 * gold) + 1.5 * 0.7 * gold
+        sg = sg * (1 - 0.7 * gold) + 0.92 * 0.7 * gold
+        sb = sb * (1 - 0.7 * gold) + 0.5 * 0.7 * gold
     refl = P[6]
-    tr, tg, tb = P[3], P[4], P[5]
-    # glass = mirrored sky tinted by the glass + a little dark interior
-    if face == 2:
-        gr, gg, gb = 0.06, 0.07, 0.15
-    xr_ = gr * tr * refl + 0.03 * (1 - refl)
-    xg_ = gg * tg * refl + 0.035 * (1 - refl)
-    xb_ = gb * tb * refl + 0.07 * (1 - refl)
+    gr_ = sr * P[3] * refl + 0.03 * (1 - refl)
+    gg_ = sg * P[4] * refl + 0.035 * (1 - refl)
+    gb_ = sb * P[5] * refl + 0.07 * (1 - refl)
+    # ---- frame / wall light
+    if face == 0:
+        # round 12: shade light keeps the material's own hue (stone reads warm, white panels read white)
+        tvf = 0.72 + 0.56 * _hash(tseed, 9, 2, 433)
+        lr, lg, lb = (0.33 + 0.08 * hv) * tvf, (0.32 + 0.08 * hv) * tvf, (0.42 + 0.1 * hv) * tvf
+    elif face == 1:
+        lr = (0.95 + 0.35 * hv) * (0.7 + 0.45 * uu)
+        lg = (0.6 + 0.12 * hv) * (0.7 + 0.45 * uu)
+        lb = 0.42 + 0.06 * hv
+    else:
+        lr, lg, lb = 0.1, 0.12, 0.24
+    ab = (B[AR] + B[AG] + B[AB]) / 3.0
+    vk = 0.85 + 0.3 * (ab - 0.85)
+    fr_, fg_, fb_ = P[0] * lr * vk, P[1] * lg * vk, P[2] * lb * vk
     # ---- structure masks
     spf = P[7]
     mw = P[8]
-    punched = P[12] > 0.5
     fl = math.floor(v / flh)
     ci = math.floor(u / bay)
-    pu = _pulse(u - 0.5 * mw, fu, bay, 0.0, bay - mw)
-    pv = _pulse(v - spf * flh * 0.6, fv, flh, 0.0, flh * (1.0 - spf))
+    if punched:
+        # precast / stone: punched windows ~half the bay, deep reveals
+        # tall narrow windows stacked in continuous vertical strips (the precast piers read as lines)
+        pu = _pulse(u - bay * 0.3, fu, bay, 0.0, bay * 0.42)
+        pv = _pulse(v - flh * 0.12, fv, flh, 0.0, flh * 0.76)
+    else:
+        pu = _pulse(u - 0.5 * mw, fu, bay, 0.0, bay - mw)
+        pv = _pulse(v - spf * flh * 0.6, fv, flh, 0.0, flh * (1.0 - spf))
     gm = pu * pv
-    # piers every n bays (a deeper vertical member, lighter on its lit edge)
     npb = int(P[9])
     pier = 0.0
     if npb > 0:
         pier = _pulse(u + 0.5 * P[10], fu, bay * npb, 0.0, P[10])
-    # corner returns: solid frame at both face edges on framed / stone towers
     cw = P[11] * bay
     corner = 0.0
     if cw > 0.0:
         corner = max(_sstep(cw + fu, cw, u), _sstep(wdt - cw - fu, wdt - cw, u))
-    # mechanical floors every mf floors: louvred band, no windows
     mf = 10 + tseed % 7
     mech = 1.0 if (int(fl) % mf) == mf - 1 and v > flh * 3 and v < hb - flh * 2 else 0.0
-    # parapet + lobby
     par = _sstep(hb - 1.8 - fv, hb - 1.8, v)
     lob = 1.0 - _sstep(0.0, 0.5, vb - 9.0)
+    resid = P[13] > 0.5
+    if resid:
+        # white-panel residential: continuous balcony parapets (pale bands), recessed dark glass, unit
+        # partitions every two bays
+        pv = 1.0 - _pulse(v, fv, flh, 0.0, flh * 0.4)
+        pu = 1.0 - _pulse(u, fu, bay * 2.0, 0.0, 0.45)
+        gm = pv * pu
+        mech = 0.0
     solid = max(max(pier, corner), max(par, mech))
     gm = gm * (1.0 - solid)
-    # vertical recessed notch in the middle of some faces (reads as depth)
-    notch = 0.0
-    if (tseed // 5) % 3 == 0 and wdt > 20.0:
-        nw = bay * (1 + (tseed // 7) % 2)
-        notch = _pulse(u - 0.5 * wdt + 0.5 * nw, fu, 1e6, 0.0, nw)
-    # ---- spandrel colour: opaque glass on curtain walls, frame on punched / framed walls
-    if punched:
-        sr, sg, sb = fr_, fg_, fb_
-        cl_ = _pulse(v, fv, flh, 0.0, 0.12)
-        sr, sg, sb = sr * (1 - 0.18 * cl_), sg * (1 - 0.18 * cl_), sb * (1 - 0.15 * cl_)
+    # ---- compose: glass, spandrel (opaque glass or wall), mullions (frame)
+    if resid:
+        gr_, gg_, gb_ = gr_ * 0.55 + 0.02, gg_ * 0.55 + 0.02, gb_ * 0.6 + 0.04
+        cr = gr_ * gm + fr_ * 1.12 * (1 - gm)
+        cg = gg_ * gm + fg_ * 1.12 * (1 - gm)
+        cb = gb_ * gm + fb_ * 1.1 * (1 - gm)
+        solid = 0.0
+    elif punched:
+        # window glass sits in a shadowed reveal: dimmer reflection, darker top edge
+        rv = _sstep(0.0, 0.3, (v - fl * flh - flh * 0.12) / max(flh * 0.76, 0.1))
+        gr_, gg_, gb_ = gr_ * (0.6 + 0.3 * rv), gg_ * (0.6 + 0.3 * rv), gb_ * (0.65 + 0.3 * rv)
+        wr_, wg_, wb_ = fr_, fg_, fb_
+        # at a distance the punched grid melts into the wall (painted LOD: no dot grid)
+        mlt = _sstep(bay * 0.9, bay * 0.3, fu) * 0.55 + 0.45
+        gr_, gg_, gb_ = wr_ + (gr_ - wr_) * mlt, wg_ + (gg_ - wg_) * mlt, wb_ + (gb_ - wb_) * mlt
+        # horizontal precast joints
+        jl = _pulse(v, fv, flh, 0.0, 0.1)
+        wr_, wg_, wb_ = wr_ * (1 - 0.2 * jl), wg_ * (1 - 0.2 * jl), wb_ * (1 - 0.18 * jl)
+        cr = gr_ * gm + wr_ * (1 - gm)
+        cg = gg_ * gm + wg_ * (1 - gm)
+        cb = gb_ * gm + wb_ * (1 - gm)
     else:
-        sr, sg, sb = xr_ * 0.62 + fr_ * 0.25, xg_ * 0.62 + fg_ * 0.25, xb_ * 0.62 + fb_ * 0.25
-    spm = 1.0 - pv                # spandrel rows
-    mulm = max(pv - pu * pv, 0.0)  # just the mullions
-    cr = xr_ * gm + (sr * spm + fr_ * mulm) * (1 - solid)
-    cg = xg_ * gm + (sg * spm + fg_ * mulm) * (1 - solid)
-    cb = xb_ * gm + (sb * spm + fb_ * mulm) * (1 - solid)
-    sk2 = 1.0
-    if face == 1 and pier > 0.0:
-        sk2 = 1.25
+        spm = 1.0 - pv
+        mulm = max(pv - pu * pv, 0.0)
+        # spandrels: opaque back-painted glass, a little darker and flatter than the vision glass
+        spr, spg, spb = gr_ * 0.7 + fr_ * 0.2, gg_ * 0.7 + fg_ * 0.2, gb_ * 0.72 + fb_ * 0.2
+        # mullions: continuous vertical lines, lighter than the glass on the shadow face (they catch the sky)
+        mk = 1.25 if face == 0 else 0.85
+        cr = gr_ * gm + (spr * spm + fr_ * mk * mulm) * (1 - solid)
+        cg = gg_ * gm + (spg * spm + fg_ * mk * mulm) * (1 - solid)
+        cb = gb_ * gm + (spb * spm + fb_ * mk * mulm) * (1 - solid)
+    sk2 = 1.25 if (face == 1 and pier > 0.0) else 1.0
     cr += fr_ * solid * sk2
     cg += fg_ * solid * sk2
     cb += fb_ * solid * sk2
     if mech > 0.0:
         lv = _pulse(v, fv, 0.45, 0.0, 0.15)
         cr, cg, cb = cr * (0.8 - 0.2 * lv), cg * (0.8 - 0.2 * lv), cb * (0.82 - 0.2 * lv)
-    if notch > 0.0:
-        dn = 0.55 if face == 0 else 0.7
-        cr, cg, cb = cr * (1 - notch * (1 - dn)), cg * (1 - notch * (1 - dn)), cb * (1 - notch * (1 - dn) * 0.8)
+    # window-cleaning gondola rails under the parapet: two thin lines catching the light
+    rails = max(_pulse(v - (hb - 2.6), fv, 1e6, 0.0, 0.25), _pulse(v - (hb - 4.0), fv, 1e6, 0.0, 0.2))
+    if rails > 0.0 and hb > 40.0:
+        if face == 1:
+            cr, cg, cb = cr + 0.5 * rails, cg + 0.3 * rails, cb + 0.16 * rails
+        elif face == 0:
+            cr, cg, cb = cr + 0.1 * rails, cg + 0.1 * rails, cb + 0.14 * rails
     if lob > 0.0:
-        cr, cg, cb = cr * (1 - lob) + 0.12 * lob, cg * (1 - lob) + 0.1 * lob, cb * (1 - lob) + 0.14 * lob
-    # broad painted value gradient: darker toward the base, a touch of sky light at the top
-    vg = 0.78 + 0.3 * _sstep(0.0, 1.0, v / max(hb, 1.0)) if B[BASE] < 1.0 else 1.05
-    out[0], out[1], out[2] = cr * vg, cg * vg, cb * vg
-    if face == 0:
-        # light wraps round from the afterglow: the sunward third of the shadow face warms and lifts
-        sw = 1.0 if B[BX0] + B[BX1] > 2.0 * sunx * z else 0.0
-        du = u / wdt if sw > 0.5 else 1.0 - u / wdt
-        wr = (1.0 - _sstep(0.0, 0.45, du)) * (0.35 + 0.65 * hv)
-        out[0] += wr * 0.16 * (0.4 + out[0])
-        out[1] += wr * 0.07 * (0.4 + out[1])
-        out[2] += wr * 0.02
-    # ---- lights: tenants switch on whole floor sections; warm white / fluorescent / a few cool
+        # warm stone lobby base
+        cr = cr * (1 - lob) + 0.55 * lr * lob
+        cg = cg * (1 - lob) + 0.42 * lg * lob
+        cb = cb * (1 - lob) + 0.34 * lb * lob
+    # broad painted value gradient: darker toward the base
+    vg = 0.74 + 0.36 * _sstep(0.0, 1.0, hv)
+    if face != 2:
+        # round 14: painted variation - streaks / patches mostly on the opaque parts, a light top band
+        wz_ = _weather(u, v, hb, fu, seed)
+        wz_ = 1.0 + (wz_ - 1.0) * (0.45 + 0.55 * (1.0 - gm))
+        vg *= wz_
+    cr, cg, cb = cr * vg, cg * vg, cb * vg
+    # ---- backlit towers (near the sun): dark, desaturated, cool silhouettes; structure barely readable
+    if bl > 0.0:
+        lum = 0.3 * cr + 0.55 * cg + 0.15 * cb
+        if face == 1:
+            tr_, tg_, tb_ = 0.2 + 0.25 * lum, 0.13 + 0.15 * lum, 0.15 + 0.12 * lum
+        else:
+            tr_, tg_, tb_ = 0.07 + 0.2 * lum, 0.08 + 0.2 * lum, 0.13 + 0.24 * lum
+        kb = 0.55 * bl
+        cr, cg, cb = cr * (1 - kb) + tr_ * kb, cg * (1 - kb) + tg_ * kb, cb * (1 - kb) + tb_ * kb
+    # ---- sun-side silhouette edge: a crisp gold line on the far corner of the lit face (side towers)
+    if face == 1:
+        rim = _sstep(fu * 2.0, fu * 0.6, wdt - u) * (0.35 + 0.65 * hv) * (1.0 - 0.4 * bl)
+        if face0 == 2:
+            rim = min(rim * 1.4, 1.0)
+        cr, cg, cb = cr + 1.6 * rim, cg + 1.02 * rim, cb + 0.55 * rim
+    elif face == 2:
+        rim = _sstep(fu * 1.8, fu * 0.6, wdt - u) * (0.3 + 0.5 * hv) * (1.0 - bl)
+        cr, cg, cb = cr + 1.0 * rim, cg + 0.62 * rim, cb + 0.36 * rim
+    elif face == 0:
+        # round 13: a lost, soft edge on the shadow side of the shaded face (it melts into the haze), and a
+        # thin hot rim on the sun-side edge where no side face is visible
+        ush = u if lside else wdt - u
+        lost = _sstep(fu * 7.0, 0.0, ush) * 0.45 * (0.5 + 0.5 * hv)
+        cr, cg, cb = cr * (1 - lost) + 0.46 * lost, cg * (1 - lost) + 0.42 * lost, cb * (1 - lost) + 0.6 * lost
+        usn = wdt - u if lside else u
+        rim0 = _sstep(fu * 2.2, fu * 0.5, usn) * (0.3 + 0.7 * hv) * (1.0 - 0.35 * bl) * 1.1
+        cr, cg, cb = cr + 1.5 * rim0, cg + 0.9 * rim0, cb + 0.5 * rim0
+    # round 14: a hot gold glint running down the sun-side corner of a few glass towers (wwy_07): tight core,
+    # soft falloff along the height, a short bloom
+    if B[RS] > 8.5 and face == 0 and bl < 0.9:
+        gq = (int(B[RS] - 1.0 + 0.5) // 4 - 2) / 20.0
+        usn2 = wdt - u if lside else u
+        g1 = _sstep(fu * 3.2 + 0.6, fu * 0.5, usn2) * math.exp(-((q - gq) / 0.16) ** 2)
+        g2 = _sstep(fu * 26.0 + 5.0, 0.0, usn2) * math.exp(-((q - gq) / 0.1) ** 2)
+        g3 = math.exp(-((q - gq) / 0.035) ** 2) * _sstep(wdt * 0.6, 0.0, usn2)     # a short flare across
+        gl = (g1 + 0.95 * g2 + 0.35 * g3) * (1.0 - bl)
+        if gl > 0.003:
+            k_ = min(gl, 1.0)
+            cr = cr * (1 - 0.7 * k_) + 1.2 * k_
+            cg = cg * (1 - 0.7 * k_) + 0.66 * k_
+            cb = cb * (1 - 0.8 * k_) + 0.2 * k_
+            out[0], out[1], out[2] = cr, cg, cb
+            out[3], out[4], out[5] = 0.55 * gl, 0.26 * gl, 0.06 * gl
+            out[6] = -10.0
+            out[7] = min(gl * 2.0, 1.0)
+            return
+    out[0], out[1], out[2] = cr, cg, cb
     out[3], out[4], out[5], out[6], out[7] = 0.0, 0.0, 0.0, 1e9, 0.0
+    if face == 1:
+        # the gold glass glows (blooms) where it is hottest
+        hot = max(0.3 * cr + 0.55 * cg + 0.15 * cb - 0.5, 0.0) * (1.0 - bl) * max(gm, 0.4)
+        if hot > 0.0:
+            out[3], out[4], out[5] = cr * hot * 0.9, cg * hot * 0.9, cb * hot * 0.9
+            out[6] = -10.0
+            out[7] = min(hot * 3.0, 1.0)
+        return
     if face == 2 or gm <= 0.0:
         return
-    grp = 2 + (seed % 5)
-    sec = int(math.floor((ci + 3.0 * _hash(seed, int(fl), 0, 409)) / grp))   # sections staggered per floor
-    runf = 1
-    run = int(math.floor(fl / runf))
+    # ---- lights on the shadow face only: whole tenant floors as ribbons (few), none on backlit towers
+    grp = 6 + (seed % 7)
+    sec = int(math.floor((ci + 7.0 * _hash(seed, int(fl), 0, 409)) / grp))
+    run = int(fl)
     r1 = _hash(seed, face + 7, run, sec)
-    lit0 = B[LIT0]
-    litadd = B[LITADD]
+    lit0 = B[LIT0] * 0.35 * (1.0 - bl)
+    litadd = B[LITADD] * 0.3 * (1.0 - bl)
     on = 1e9
     if r1 < lit0:
         on = -10.0
     elif r1 < lit0 + litadd:
         clu = run // 4
         on = 0.25 + 4.6 * _hash(seed, clu, sec, 41) + 0.09 * (run - clu * 4)
-    if _hash(seed, int(fl), int(ci), 405) < 0.3:
+    if _hash(seed, int(fl), int(ci), 405) < 0.08:
         on = 1e9
     if on > 1e8:
         return
     r3 = _hash(seed, run, sec, 99)
-    if r3 < 0.45:
-        er, eg, eb = 1.05, 0.92, 0.72
-    elif r3 < 0.85:
+    if r3 < 0.5:
+        er, eg, eb = 1.05, 0.9, 0.7
+    elif r3 < 0.9:
         er, eg, eb = 0.95, 0.97, 0.92
-    elif r3 < 0.93:
-        er, eg, eb = 1.15, 0.66, 0.3
     else:
         er, eg, eb = 0.62, 0.8, 1.1
-    ei = (0.32 + 0.3 * _hash(seed, int(fl), int(ci), 406)) * (1.0 - 0.6 * refl * (1.0 if face == 1 else 0.3))
-    # lit panes show the ceiling light as the upper part of the pane (a horizontal strip, not a full block)
-    wv0 = spf * flh * 0.6
-    rel = (v - fl * flh - wv0) / max(flh * (1.0 - spf), 0.1)
-    gm = gm * (0.45 + 0.55 * _sstep(0.25, 0.55, rel))
-    if _hash(seed, int(fl), int(ci) // 3, 407) < 0.2:
-        ei *= 0.5
+    ei = (0.18 + 0.1 * _hash(seed, int(fl), int(ci) // 4, 406)) * (1.0 - 0.4 * refl)
     out[3], out[4], out[5] = er * ei * gm, eg * ei * gm, eb * ei * gm
     out[6] = on
     out[7] = gm
@@ -974,37 +1201,44 @@ def render_band(B, order, bb, Hs, Ws, ss, x_off, y_off, cx, hy, f, cam_h, zmin, 
                     lamp2 = _pulse(zg, fz, 26.0, 0.0, 2.0) * sxg
                     li = min(lamp + lamp2, 1.0) * 0.45 + st * 0.05
                     er, eg, eb = 1.0 * li, 0.6 * li, 0.28 * li
-                    if street.shape[0] > 7 and xg >= street[6] and xg <= street[7]:
-                        # round 6: the boulevard - dark asphalt, pale sidewalks under sodium lamps, and
-                        # long-exposure light trails: white-gold headlights in the inbound lanes, red tail
-                        # lights outbound, bunched by traffic (static: no flicker)
-                        ua = xg - street[6]
-                        wa = street[7] - street[6]
-                        cr, cg, cb = 0.07, 0.065, 0.12
+                    xa_c = 0.0
+                    if street.shape[0] > 8:
+                        xa_c = street[6] + street[7] * (zg - 1000.0)
+                    if street.shape[0] > 8 and abs(xg - xa_c) <= street[8]:
+                        # round 11: a diagonal boulevard receding toward the afterglow - dark asphalt, pale
+                        # sidewalks with dotted lamps, and individual cars as tiny light dots (white-gold
+                        # headlights inbound, red tail lights outbound), bunched by traffic (static)
+                        wa = 2.0 * street[8]
+                        ua = xg - (xa_c - street[8])
+                        cr, cg, cb = 0.06, 0.06, 0.1
                         er, eg, eb = 0.0, 0.0, 0.0
                         if ua < 3.5 or ua > wa - 3.5:
-                            cr, cg, cb = 0.2, 0.15, 0.2
-                            lp = _pulse(zg, fz, 28.0, 0.0, 3.0)
-                            er, eg, eb = 0.55 + 0.9 * lp, 0.3 + 0.5 * lp, 0.12 + 0.2 * lp
+                            cr, cg, cb = 0.16, 0.13, 0.18
+                            lp = _pulse(zg, fz, 31.0, 0.0, 1.2)
+                            er, eg, eb = 0.12 + 0.9 * lp, 0.07 + 0.55 * lp, 0.03 + 0.22 * lp
                         elif abs(ua - 0.5 * wa) < 1.2:
-                            cr, cg, cb = 0.1, 0.1, 0.13      # median
+                            cr, cg, cb = 0.09, 0.1, 0.12      # median
                         else:
                             inb = ua < 0.5 * wa
                             lane = (ua - 3.5) / 3.3 if inb else (ua - 0.5 * wa - 1.2) / 3.3
                             li_ = int(lane)
                             dl = abs(lane - li_ - 0.5)
-                            tr = _sstep(0.32 + fp * 0.5, 0.08, dl)
-                            den = 0.55 + 0.45 * math.sin(zg * 0.011 + li_ * 1.7 + (0.0 if inb else 2.0)) *                                 math.sin(zg * 0.0037 + li_ * 0.9)
-                            den = max(den, 0.15)
+                            acr = _sstep(0.3 + fp * 0.3, 0.18, dl)
+                            den = 0.5 + 0.5 * math.sin(zg * 0.009 + li_ * 1.7 + (0.0 if inb else 2.0)) *                                 math.sin(zg * 0.0031 + li_ * 0.9)
+                            shl = 3.7 * li_ + (0.0 if inb else 5.0)
+                            ncell = int(math.floor((zg + shl) / 9.5))
+                            car = _pulse(zg + shl, fz, 9.5, 2.0, 4.4) * acr
+                            if _hash(ncell, li_, 5 if inb else 6, 501) > 0.25 + 0.55 * den:
+                                car = 0.0
                             if inb:
-                                er, eg, eb = 1.5 * tr * den, 1.25 * tr * den, 0.85 * tr * den
+                                er, eg, eb = 1.7 * car, 1.4 * car, 0.95 * car
                             else:
-                                er, eg, eb = 1.4 * tr * den, 0.16 * tr * den, 0.08 * tr * den
+                                er, eg, eb = 1.5 * car, 0.14 * car, 0.07 * car
                             # lane markings
                             mk = _pulse(zg, fz, 12.0, 0.0, 6.0) * _sstep(0.12 + fp, 0.02, abs(lane - li_))
-                            cr += 0.25 * mk
-                            cg += 0.24 * mk
-                            cb += 0.26 * mk
+                            cr += 0.14 * mk
+                            cg += 0.13 * mk
+                            cb += 0.15 * mk
                         li = 1.0
                     eon = -10.0
                     ew = li
@@ -1025,20 +1259,28 @@ def render_band(B, order, bb, Hs, Ws, ss, x_off, y_off, cx, hy, f, cam_h, zmin, 
                 fu = 0.0
                 fv = 0.0
                 Yh = 0.0
-                # front face z = z0
-                X = dx * z0 / f
-                Y = cam_h - dy * z0 / f
-                if X >= x0 and X <= x1 and Y >= base and Y <= hb:
-                    face = 0
-                    zz = z0
-                    u = X - x0
-                    v = Y - base
-                    fu = z0 / f / ss
-                    fv = fu
-                    Yh = Y
-                    if mat == M_FENCE and _fence_gap(u, v, hb - base, fu):
-                        face = -1
-                if face < 0:
+                ytop = hb
+                pk = 0
+                rk = int(B[i, RK])
+                if rk > 0 and mat != M_FENCE:
+                    # round 11: pitched / slanted roofs (gable houses, street-slant setbacks): the nearest valid
+                    # hit among the front face, the visible side face and the roof planes
+                    rs = B[i, RS]
+                    zbest = 1e18
+                    # front face
+                    X = dx * z0 / f
+                    Y = cam_h - dy * z0 / f
+                    if X >= x0 and X <= x1 and Y >= base:
+                        tp = _roof_top(rk, rs, x0, x1, z0, z1, hb, base, X, z0)
+                        if Y <= tp:
+                            zbest = z0
+                            face = 0
+                            u = X - x0
+                            v = Y - base
+                            fu = z0 / f / ss
+                            fv = fu
+                            Yh = Y
+                            ytop = tp
                     xs = 0.0
                     sd = 0
                     if x0 > 0.0 and dx > 0.0:
@@ -1050,44 +1292,184 @@ def render_band(B, order, bb, Hs, Ws, ss, x_off, y_off, cx, hy, f, cam_h, zmin, 
                     if sd > 0:
                         zs = f * xs / dx
                         Y = cam_h - dy * zs / f
-                        if zs >= z0 and zs <= z1 and Y >= base and Y <= hb:
-                            face = sd
-                            zz = zs
-                            u = zs - z0
-                            v = Y - base
-                            fv = zs / f / ss
-                            fu = fv * zs / abs(xs) if abs(xs) > 1e-3 else 1e3
-                            Yh = Y
-                            if mat == M_FENCE and _fence_gap(u, v, hb - base, fu):
-                                face = -1
-                    if face < 0 and mat == M_FENCE:
-                        # back face of a fence ring (seen through the front)
-                        X = dx * z1 / f
-                        Y = cam_h - dy * z1 / f
-                        if X >= x0 and X <= x1 and Y >= base and Y <= hb:
-                            if not _fence_gap(X - x0, Y - base, hb - base, z1 / f / ss):
-                                face = 2
-                                zz = z1
-                                u = X - x0
+                        if zs >= z0 and zs <= z1 and Y >= base and zs < zbest:
+                            tp = _roof_top(rk, rs, x0, x1, z0, z1, hb, base, xs, zs)
+                            if Y <= tp:
+                                zbest = zs
+                                face = sd
+                                u = zs - z0
                                 v = Y - base
-                                fu = z1 / f / ss
-                                fv = fu
+                                fv = zs / f / ss
+                                fu = fv * zs / abs(xs) if abs(xs) > 1e-3 else 1e3
                                 Yh = Y
-                if face < 0 and hb < cam_h and dy > 0.0 and mat != M_FENCE:
-                    zr = f * (cam_h - hb) / dy
-                    X = dx * zr / f
-                    if zr >= z0 and zr <= z1 and X >= x0 and X <= x1:
-                        face = 3
-                        zz = zr
+                                ytop = tp
+                    # roof planes y = a + bx * x + bz * z
+                    for pi_ in range(3):
+                        a_ = 0.0
+                        bx_ = 0.0
+                        bz_ = 0.0
+                        okp = False
+                        if rk == 1:
+                            dsl = _slant_depth(rs, z0, z1, hb, base)
+                            if pi_ == 0:
+                                a_ = hb - rs * (z0 + dsl)
+                                bz_ = rs
+                                okp = True
+                            elif pi_ == 1:
+                                a_ = hb
+                                okp = True
+                        elif rk == 2:
+                            zm = 0.5 * (z0 + z1)
+                            if pi_ == 0:
+                                a_ = hb - rs * zm
+                                bz_ = rs
+                                okp = True
+                            elif pi_ == 1:
+                                a_ = hb + rs * zm
+                                bz_ = -rs
+                                okp = True
+                        else:
+                            xm = 0.5 * (x0 + x1)
+                            if pi_ == 0:
+                                a_ = hb - rs * xm
+                                bx_ = rs
+                                okp = True
+                            elif pi_ == 1:
+                                a_ = hb + rs * xm
+                                bx_ = -rs
+                                okp = True
+                        if not okp:
+                            continue
+                        den = dy / f + bx_ * dx / f + bz_
+                        if den <= 1e-9:
+                            continue
+                        zr = (cam_h - a_) / den
+                        if zr < z0 or zr > z1 or zr >= zbest:
+                            continue
+                        X = dx * zr / f
+                        if X < x0 or X > x1:
+                            continue
+                        Y = cam_h - dy * zr / f
+                        tp = _roof_top(rk, rs, x0, x1, z0, z1, hb, base, X, zr)
+                        if abs(Y - tp) > 0.02 + 0.002 * zr / f * 4.0 or Y < base:
+                            continue
+                        zbest = zr
+                        face = 4
+                        if rk == 1 and pi_ == 1:
+                            face = 3
+                        pk = pi_
                         u = X - x0
                         v = zr - z0
-                        Yh = hb
+                        Yh = Y
+                        ytop = tp
+                    if face >= 0:
+                        zz = zbest
+                        Y = Yh
+                if rk > 0 and mat != M_FENCE:
+                    pass
+                else:
+                  # front face z = z0
+                  X = dx * z0 / f
+                  Y = cam_h - dy * z0 / f
+                  if X >= x0 and X <= x1 and Y >= base and Y <= hb:
+                      face = 0
+                      zz = z0
+                      u = X - x0
+                      v = Y - base
+                      fu = z0 / f / ss
+                      fv = fu
+                      Yh = Y
+                      if mat == M_FENCE and _fence_gap(u, v, hb - base, fu):
+                          face = -1
+                  if face < 0:
+                      xs = 0.0
+                      sd = 0
+                      if x0 > 0.0 and dx > 0.0:
+                          xs = x0
+                          sd = 1
+                      elif x1 < 0.0 and dx < 0.0:
+                          xs = x1
+                          sd = 2
+                      if sd > 0:
+                          zs = f * xs / dx
+                          Y = cam_h - dy * zs / f
+                          if zs >= z0 and zs <= z1 and Y >= base and Y <= hb:
+                              face = sd
+                              zz = zs
+                              u = zs - z0
+                              v = Y - base
+                              fv = zs / f / ss
+                              fu = fv * zs / abs(xs) if abs(xs) > 1e-3 else 1e3
+                              Yh = Y
+                              if mat == M_FENCE and _fence_gap(u, v, hb - base, fu):
+                                  face = -1
+                      if face < 0 and mat == M_FENCE:
+                          # back face of a fence ring (seen through the front)
+                          X = dx * z1 / f
+                          Y = cam_h - dy * z1 / f
+                          if X >= x0 and X <= x1 and Y >= base and Y <= hb:
+                              if not _fence_gap(X - x0, Y - base, hb - base, z1 / f / ss):
+                                  face = 2
+                                  zz = z1
+                                  u = X - x0
+                                  v = Y - base
+                                  fu = z1 / f / ss
+                                  fv = fu
+                                  Yh = Y
+                  if face < 0 and hb < cam_h and dy > 0.0 and mat != M_FENCE:
+                      zr = f * (cam_h - hb) / dy
+                      X = dx * zr / f
+                      if zr >= z0 and zr <= z1 and X >= x0 and X <= x1:
+                          face = 3
+                          zz = zr
+                          u = X - x0
+                          v = zr - z0
+                          Yh = hb
                 if face < 0:
                     continue
                 hit = True
                 zh = zz
                 yw_hit = Yh
-                if face == 3:
+                if face == 3 and mat == M_ROAD:
+                    # round 12: expressway deck seen from above: asphalt, parapets, dashed lane lines, a
+                    # median, lamp posts, and traffic as small light dots (white-gold inbound / red outbound)
+                    wa = x1 - x0
+                    ua = u
+                    zw_ = z0 + v
+                    fz = zz / f / ss * zz / max(cam_h - hb, 1.0)
+                    pwr = zz / f / ss
+                    cr, cg, cb = 0.09, 0.085, 0.12
+                    er, eg, eb, eon, ew = 0.0, 0.0, 0.0, -10.0, 0.0
+                    if ua < 0.7 + pwr or ua > wa - 0.7 - pwr:
+                        cr, cg, cb = 0.34, 0.31, 0.4
+                        lp = _pulse(zw_, fz, 36.0, 0.0, 1.6)
+                        er, eg, eb, ew = 1.3 * lp, 0.8 * lp, 0.36 * lp, lp
+                    elif abs(ua - 0.5 * wa) < 0.5 + pwr * 0.5:
+                        cr, cg, cb = 0.2, 0.19, 0.24
+                    else:
+                        inb = ua < 0.5 * wa
+                        lane = (ua - 0.7) / 3.4 if inb else (ua - 0.5 * wa - 0.5) / 3.4
+                        lnr_ = int(lane)
+                        dl = abs(lane - lnr_ - 0.5)
+                        acr = _sstep(0.3 + pwr * 0.3, 0.15, dl)
+                        shl = 5.3 * lnr_ + (0.0 if inb else 7.0)
+                        ncell = int(math.floor((zw_ + shl) / 11.0))
+                        car = _pulse(zw_ + shl, fz, 11.0, 2.0, 4.4) * acr
+                        den = 0.5 + 0.5 * math.sin(zw_ * 0.006 + lnr_ * 1.3 + (0.0 if inb else 2.0))
+                        if _hash(ncell, lnr_, 7 if inb else 8, 502) > 0.18 + 0.42 * den:
+                            car = 0.0
+                        if inb:
+                            er, eg, eb = 1.6 * car, 1.35 * car, 0.95 * car
+                        else:
+                            er, eg, eb = 1.15 * car, 0.22 * car, 0.12 * car
+                        ew = car
+                        mk = _pulse(zw_, fz, 10.0, 0.0, 5.0) * _sstep(0.12 + pwr, 0.03, abs(lane - lnr_))
+                        cr += 0.16 * mk
+                        cg += 0.15 * mk
+                        cb += 0.16 * mk
+                        cr += 0.04 * car
+                        cg += 0.03 * car
+                elif face == 3:
                     # roof: reflects the violet zenith; material by roof type; thin parapet rim, the far
                     # (sunward) parapet catches a pink glint
                     ar, ag, ab = B[i, AR], B[i, AG], B[i, AB]
@@ -1097,28 +1479,61 @@ def render_band(B, order, bb, Hs, Ws, ss, x_off, y_off, cx, hy, f, cam_h, zmin, 
                     edge2 = max(_sstep(pw * 1.5 + 0.3, 0.0, v), _sstep(pw * 1.5 + 0.3, 0.0, u),
                                 _sstep(pw * 1.5 + 0.3, 0.0, (x1 - x0) - u))
                     rt = int(B[i, ROOFT])
-                    # round 10: roofs are the lightest planes of the rooftop sea (they mirror the open sky)
-                    if rt == 0:     # grey-violet gravel / membrane
-                        rr_, rg_, rb_ = 0.3, 0.3, 0.44
-                    elif rt == 1:   # pale concrete
-                        rr_, rg_, rb_ = 0.44, 0.42, 0.54
-                    elif rt == 2:   # green painted
-                        rr_, rg_, rb_ = 0.2, 0.32, 0.34
-                    elif rt == 3:   # dark
-                        rr_, rg_, rb_ = 0.17, 0.17, 0.28
-                    else:           # rust / terracotta
-                        rr_, rg_, rb_ = 0.4, 0.25, 0.3
-                    rv = _hash(int(B[i, SEED]), 7, 7, 7)
-                    rr_, rg_, rb_ = rr_ * 1.3, rg_ * 1.3, rb_ * 1.25
-                    cr = (rr_ + 0.03 * kf + 0.04 * rv) * (0.7 + 0.3 * ar)
-                    cg = (rg_ + 0.02 * kf + 0.03 * rv) * (0.7 + 0.3 * ag)
-                    cb = (rb_ + 0.03 * kf + 0.04 * rv) * (0.7 + 0.3 * ab)
-                    # parapet lines
-                    cr = cr * (1 - 0.35 * edge2) + edge * 0.28
-                    cg = cg * (1 - 0.35 * edge2) + edge * 0.14
-                    cb = cb * (1 - 0.3 * edge2) + edge * 0.18
+                    sdr = int(B[i, SEED])
+                    rv = _hash(sdr, 7, 7, 7)
+                    # round 13: painted roof planes. Flat roofs look straight up at the bright dusk sky, so
+                    # they are the lightest planes of the rooftop sea: lit by a lilac sky dome, warming toward
+                    # the afterglow axis. Real roof materials (grey concrete, beige tile, green / grey membrane,
+                    # dark tar, rust-red painted, white panel), membrane seams, drain stains, weathering.
+                    mt = (rt + int(rv * 5.0)) % 6
+                    if mt == 0:     # grey concrete
+                        rr_, rg_, rb_ = 0.56, 0.55, 0.58
+                    elif mt == 1:   # beige tile / sand
+                        rr_, rg_, rb_ = 0.66, 0.56, 0.45
+                    elif mt == 2:   # green membrane
+                        rr_, rg_, rb_ = 0.36, 0.5, 0.44
+                    elif mt == 3:   # dark tar / asphalt sheet
+                        rr_, rg_, rb_ = 0.27, 0.26, 0.31
+                    elif mt == 4:   # rust-red painted metal / brick tile
+                        rr_, rg_, rb_ = 0.58, 0.34, 0.28
+                    else:           # white panel / light membrane
+                        rr_, rg_, rb_ = 0.76, 0.76, 0.78
+                    kv_ = 0.8 + 0.4 * _hash(sdr, 17, 3, 5)
+                    axr = math.exp(-abs((x0 + x1) * 0.5 / zz - sun_xw) * 5.0)
+                    lr_ = 0.74 + 0.4 * axr
+                    lg_ = 0.7 + 0.16 * axr
+                    lb_ = 0.8 - 0.14 * axr
+                    cr = rr_ * lr_ * kv_ * (0.7 + 0.3 * ar) * 1.05
+                    cg = rg_ * lg_ * kv_ * (0.7 + 0.3 * ag) * 1.05
+                    cb = rb_ * lb_ * kv_ * (0.7 + 0.3 * ab) * 1.05
+                    # grazing light: the far part of the roof (toward the afterglow) is brighter, the near part
+                    # darker (sky reflection falloff)
+                    gz = 0.85 + 0.25 * kf
+                    cr, cg, cb = cr * gz, cg * gz, cb * gz
+                    # membrane seams / tile courses (parallel to x) and a few cross joints
+                    pwm = zz / f / ss
+                    sm = _pulse(v, pwm * zz / max(cam_h - hb, 1.0), 3.2 + 1.6 * rv, 0.0, 0.18) * 0.5 +                          _pulse(u, pwm, 6.0 + 3.0 * rv, 1.0, 0.2) * 0.3
+                    # weathering: soft stain blotches + drain streaks from the corners
+                    stn = 0.5 + 0.5 * math.sin(u * 0.61 + sdr * 0.37) * math.sin(v * 0.83 + sdr * 0.11)
+                    stn = _sstep(0.55, 0.95, stn) * 0.18
+                    drn = _sstep(2.5, 0.0, min(u, (x1 - x0) - u)) * 0.15
+                    wk = 1.0 - sm * 0.14 - stn - drn
+                    cr, cg, cb = cr * wk, cg * wk, cb * (wk * 0.97 + 0.03)
+                    # parapet lines; the far (sunward) parapet catches a warm glint near the sun axis
+                    ek = (0.2 + 0.8 * axr * axr) * (1.0 if _hash(sdr, 71, 73, 79) < 0.6 else 0.35)
+                    cr = cr * (1 - 0.45 * edge2) + edge * 0.75 * ek
+                    cg = cg * (1 - 0.45 * edge2) + edge * 0.42 * ek
+                    cb = cb * (1 - 0.4 * edge2) + edge * 0.24 * ek
                     # helipad on a few large roofs
                     er, eg, eb, eon, ew = 0.0, 0.0, 0.0, 0.0, 0.0
+                    # round 11: the low sun slips between the towers and catches whole districts of roofs
+                    xw_ = x0 + u
+                    zw_ = z0 + v
+                    spt = _sstep(0.58, 0.8, 0.5 + 0.32 * math.sin(xw_ * 0.011 + zw_ * 0.0042 + 0.7) +
+                                 0.22 * math.sin(xw_ * 0.029 - zw_ * 0.009 + 1.3))
+                    cr += spt * 0.42 * (0.6 + 0.4 * rv)
+                    cg += spt * 0.24 * (0.6 + 0.4 * rv)
+                    cb += spt * 0.1 * (0.6 + 0.4 * rv)
                     if B[i, CROWN] > 1.5:
                         rx = u - 0.5 * (x1 - x0)
                         rz = v - 0.5 * (z1 - z0)
@@ -1130,6 +1545,74 @@ def render_band(B, order, bb, Hs, Ws, ss, x_off, y_off, cx, hy, f, cam_h, zmin, 
                             cr, cg, cb = 0.5, 0.48, 0.5
                         if abs(dr - rad - 1.2) < 0.4 + pw and _pulse(math.atan2(rz, rx) * rad, pw, 3.0, 0.0, 0.6) > 0.3:
                             er, eg, eb, eon, ew = 0.3, 1.2, 0.5, -10.0, 1.0
+                elif face == 4:
+                    # round 11: pitched roof plane (kawara tile / painted metal / slate), lit by orientation:
+                    # the back slope and the -x slope face the afterglow (warm grazing light), the front slope
+                    # faces the camera and the eastern sky (cool, lighter than the walls), the +x slope is shade
+                    rt = int(B[i, ROOFT])
+                    sdr = int(B[i, SEED])
+                    pwr = zz / f / ss
+                    if rt == 0:
+                        br0, bg0, bb0 = 0.26, 0.28, 0.36      # dark kawara blue-grey
+                    elif rt == 1:
+                        br0, bg0, bb0 = 0.5, 0.24, 0.19       # red-brown painted metal
+                    elif rt == 2:
+                        br0, bg0, bb0 = 0.2, 0.38, 0.38       # teal / verdigris metal
+                    elif rt == 3:
+                        br0, bg0, bb0 = 0.22, 0.25, 0.42      # navy metal
+                    else:
+                        br0, bg0, bb0 = 0.55, 0.54, 0.56      # silver slate / galvanised
+                    if (rk == 3 and pk == 0) or (rk != 3 and pk == 1):
+                        lr_, lg_, lb_ = 1.35, 0.82, 0.5
+                    elif rk == 3:
+                        lr_, lg_, lb_ = 0.3, 0.32, 0.52
+                    else:
+                        lr_, lg_, lb_ = 0.62, 0.66, 0.92
+                    jv = 0.85 + 0.3 * _hash(sdr, 3, 9, 27)
+                    cr, cg, cb = br0 * lr_ * jv, bg0 * lg_ * jv, bb0 * lb_ * jv
+                    # tile courses parallel to the eaves
+                    wcrd = u if rk == 3 else v
+                    crs = _pulse(wcrd, pwr * 1.5, 0.45, 0.0, 0.1)
+                    cr, cg, cb = cr * (1 - 0.18 * crs), cg * (1 - 0.18 * crs), cb * (1 - 0.15 * crs)
+                    # ridge line: thin highlight where the slopes meet (lit side) / dark on the shade side
+                    if rk >= 2:
+                        dr_ = abs(u - 0.5 * (x1 - x0)) if rk == 3 else abs(v - 0.5 * (z1 - z0))
+                        rg_ = _sstep(pwr * 2.0 + 0.2, 0.0, dr_)
+                        cr, cg, cb = cr + 0.3 * rg_, cg + 0.2 * rg_, cb + 0.16 * rg_
+                    er, eg, eb, eon, ew = 0.0, 0.0, 0.0, 0.0, 0.0
+                    if rk == 1:
+                        # round 13: a street-slant setback is not a blank slope - it is a stack of stepped-back
+                        # floors: sky-lit terrace strips, window rows in the building's own material, the odd
+                        # lit office, a warm line on the terrace edges near the sun axis
+                        flh_s = B[i, FLH]
+                        fr_s = (Yh / flh_s) - math.floor(Yh / flh_s)
+                        fl_s = int(math.floor(Yh / flh_s))
+                        am_ = (B[i, AR] + B[i, AG] + B[i, AB]) / 3.0
+                        a0_ = am_ + (B[i, AR] - am_) * 1.6
+                        a1_ = am_ + (B[i, AG] - am_) * 1.6
+                        a2_ = am_ + (B[i, AB] - am_) * 1.6
+                        wr_s, wg_s, wb_s = 0.27 * a0_, 0.26 * a1_, 0.28 * a2_
+                        terr = _sstep(0.7, 0.8, fr_s)
+                        wrow = _sstep(0.12, 0.18, fr_s) * (1.0 - _sstep(0.58, 0.64, fr_s))
+                        bw_s = B[i, BAYW]
+                        wu_s = _pulse(u - 0.2 * bw_s, pwr, bw_s, 0.0, 0.65 * bw_s)
+                        wmk = wrow * wu_s
+                        hwn = _hash(sdr, fl_s, int(math.floor(u / (bw_s * 2.0))), 617)
+                        if hwn < 0.35:
+                            gr_s, gg_s, gb_s = 0.3, 0.28, 0.26
+                        else:
+                            gr_s, gg_s, gb_s = 0.17, 0.21, 0.29
+                        axs = math.exp(-abs((x0 + x1) * 0.5 / zz - sun_xw) * 5.0)
+                        tr_s = 0.5 + 0.25 * axs
+                        cr = (wr_s * (1 - wmk) + gr_s * wmk) * (1 - terr) + tr_s * 1.05 * terr
+                        cg = (wg_s * (1 - wmk) + gg_s * wmk) * (1 - terr) + tr_s * 0.95 * terr
+                        cb = (wb_s * (1 - wmk) + gb_s * wmk) * (1 - terr) + tr_s * (1.02 - 0.2 * axs) * terr
+                        eg_ = _sstep(0.9, 0.97, fr_s) * (0.15 + 0.6 * axs * axs)
+                        cr, cg, cb = cr + 0.9 * eg_, cg + 0.5 * eg_, cb + 0.28 * eg_
+                        if hwn > 0.86 and wmk > 0.0:
+                            er, eg, eb = 0.9 * wmk, 0.75 * wmk, 0.5 * wmk
+                            eon = 0.3 + 4.6 * _hash(sdr, fl_s, 3, 619)
+                            ew = wmk
                 else:
                     twr = B[i, PAL] > 0.5 and face != 3
                     if twr:
@@ -1151,7 +1634,7 @@ def render_band(B, order, bb, Hs, Ws, ss, x_off, y_off, cx, hy, f, cam_h, zmin, 
                     elif hgt > 6.0 and mat != M_BILL and mat != M_NAME and face != 3 and zz > 1300.0:
                         # round 9: mid-distance blocks get the painted LOD too (no identical window dots)
                         ppf = B[i, FLH] * (1920.0 * 2.2) / max(zz, 1.0)
-                        simp = 0.9 * _sstep(13.0, 6.0, ppf)
+                        simp = 0.6 * _sstep(5.0, 2.2, ppf)
                     if simp > 0.0:
                         bw_ = B[i, BAYW]
                         _facade(u, v, max(fu, bw_ * 3.0), fv * (1.0 + 0.8 * simp), B[i], face, zz, tmp2,
@@ -1176,7 +1659,11 @@ def render_band(B, order, bb, Hs, Ws, ss, x_off, y_off, cx, hy, f, cam_h, zmin, 
                             if face == 1:
                                 tr_, tg_, tb_ = 0.62 - 0.22 * hv_, 0.34 - 0.08 * hv_, 0.42 + 0.14 * hv_
                             else:
-                                tr_, tg_, tb_ = 0.18 + 0.2 * hv_, 0.16 + 0.07 * hv_, 0.32 + 0.16 * hv_
+                                # round 13: sky-coloured glass - dusty apricot low, lilac high, per-block value
+                                vv_ = 0.8 + 0.4 * _hash(sd_, 13, 17, 19)
+                                tr_ = (0.36 + 0.12 * hv_) * vv_
+                                tg_ = (0.27 + 0.1 * hv_) * vv_
+                                tb_ = (0.3 + 0.24 * hv_) * vv_
                             tr_ += 0.14 * dg_
                             tg_ += 0.07 * dg_
                             tb_ += 0.08 * dg_
@@ -1184,6 +1671,10 @@ def render_band(B, order, bb, Hs, Ws, ss, x_off, y_off, cx, hy, f, cam_h, zmin, 
                             tmp[1] = tmp[1] * (1.0 - gk_) + tg_ * gk_
                             tmp[2] = tmp[2] * (1.0 - gk_) + tb_ * gk_
                     cr, cg, cb = tmp[0], tmp[1], tmp[2]
+                    if rk > 0:
+                        # eave overhang shadow on the wall just under a pitched roof
+                        ea_ = 0.5 + 0.5 * _sstep(0.0, 1.2 + zz / f, ytop - Y)
+                        cr, cg, cb = cr * ea_, cg * ea_, cb * ea_
                     if hb - base <= 45.0 and face != 3 and mat != M_BILL and mat != M_NAME:
                         # round 9: painted value breaks between neighbouring mid-rise facades (each block its
                         # own value step) and a lighter top fading to a darker base (one broad gradient)
@@ -1192,130 +1683,75 @@ def render_band(B, order, bb, Hs, Ws, ss, x_off, y_off, cx, hy, f, cam_h, zmin, 
                         ht_ = _hash(sdv, 41, 43, 47) - 0.5          # warm / cool paint variation
                         hv2 = (Y - base) / max(hb - base, 1.0)
                         vg_ = 0.82 + 0.3 * hv2
-                        cr = cr * vb_ * vg_ * (1.0 + 0.3 * ht_)
+                        cr = cr * vb_ * vg_ * (1.0 + 0.45 * ht_)
                         cg = cg * vb_ * vg_
-                        cb = cb * vb_ * vg_ * (1.0 - 0.25 * ht_)
-                    if face == 0:
-                        # sunward vertical edge of the front face catches a sliver of afterglow
-                        wdt = max(x1 - x0, 1.0)
-                        side = 1.0 if (x0 + x1) * 0.5 > sun_xw * zz else -1.0
-                        g = u / wdt if side < 0 else 1.0 - u / wdt
-                        gl0 = 0.4 if (mat == M_GLASS or mat == M_DARK or mat == M_CURTAIN) else 0.14
-                        if twr:
-                            gl0 = 0.0
-                        g = g ** 10 * gl0
-                        cr += g * 1.2
-                        cg += g * 0.6
-                        cb += g * 0.4
-                        if hb <= 45.0 and mat != M_BILL and mat != M_NAME:
-                            # round 9: warm sun-side rim on the mid-rise blocks too (thin corner line + roofline),
-                            # strongest toward the sun axis
-                            pwr = zz / f
-                            dm = u if side > 0 else wdt - u
-                            ax = math.exp(-abs((x0 + x1) * 0.5 / zz - sun_xw) * 5.0)
-                            rl = _sstep(pwr * 1.7, pwr * 0.5, dm) * (0.1 + 0.6 * ax * ax)
-                            rt_ = _sstep(pwr * 1.4 + 0.1, 0.0, hb - Y) * (0.06 + 0.4 * ax * ax)
-                            rr_ = max(rl, rt_)
-                            cr += rr_ * 1.3
-                            cg += rr_ * 0.72
-                            cb += rr_ * 0.42
-                        if hb > 45.0:
-                            # crisp sunward rim line (~1.5 px) down the lit corner of the towers, hottest
-                            # high up (white-gold), fading toward the street
-                            pwr = zz / f
-                            dm = u if side > 0 else wdt - u
-                            rl = _sstep(pwr * 1.8, pwr * 0.6, dm) * (0.45 + 0.55 * _sstep(20.0, 120.0, Y))
-                            cr += rl * 1.6
-                            cg += rl * 1.05
-                            cb += rl * 0.6
-                            # round 8: a sun-glint streak - the afterglow mirrored in the curtain wall as one
-                            # narrow slanted sheet of light (crisp core, soft shoulder), on about half the
-                            # glass towers, hottest high up
-                            sdz = int(B[i, SEED])
-                            if (not twr) and (mat == M_GLASS or mat == M_CURTAIN or mat == M_BAND or mat == M_DARK) and                                     _hash(sdz, 13, 17, 19) < 0.45 and (hb - base) > 2.2 * wdt:
-                                hvz = (Y - base) / max(hb - base, 1.0)
-                                gu = u / wdt if side < 0 else 1.0 - u / wdt
-                                c0 = 0.18 + 0.3 * _hash(sdz, 13, 17, 23)
-                                dgz = gu - c0 - 0.6 * (hvz - 0.75)
-                                pxu = pwr / wdt
-                                core_z = _sstep(0.05 + 1.2 * pxu, 0.02, abs(dgz))
-                                sh_z = math.exp(-(dgz / 0.12) ** 2)
-                                gz = (0.9 * core_z + 0.25 * sh_z) * _sstep(0.25, 0.8, hvz) *                                     (0.6 if mat == M_DARK else 1.0)
-                                cr += gz * 1.1
-                                cg += gz * 0.72
-                                cb += gz * 0.55
-                                tmp[3] += gz * 0.6
-                                tmp[4] += gz * 0.36
-                                tmp[5] += gz * 0.22
-                                if gz > 0.05:
-                                    tmp[6] = min(tmp[6], -10.0)
-                                    tmp[7] = max(tmp[7], gz)
+                        cb = cb * vb_ * vg_ * (1.0 - 0.35 * ht_)
+                    # round 11: rims only where the light can reach. The low sun sits behind the city, so the
+                    # camera-facing walls are in shade; only the silhouette edges and roof lines toward the sun
+                    # catch a warm line, and only on some blocks (towers paint their own edges in _tower)
                     er, eg, eb = tmp[3], tmp[4], tmp[5]
                     eon = tmp[6]
                     ew = tmp[7]
                     pw = zz / f / ss
-                    tl = _sstep(pw * 2.0 + 0.4, 0.0, hb - Y)
-                    if face == 1:
-                        cr += tl * 0.5
-                        cg += tl * 0.28
-                        cb += tl * 0.14
-                        # hot specular sliver on the far (sunward) vertical corner of the lit side
+                    tl = _sstep(pw * 2.0 + 0.4, 0.0, ytop - Y)
+                    sdr_ = int(B[i, SEED])
+                    ax = math.exp(-abs((x0 + x1) * 0.5 / zz - sun_xw) * 6.0)
+                    lucky = _hash(sdr_, 71, 73, 79)
+                    if not twr and face == 0 and mat != M_BILL and mat != M_NAME:
+                        wdt = max(x1 - x0, 1.0)
+                        side = 1.0 if (x0 + x1) * 0.5 > sun_xw * zz else -1.0
+                        pwr = zz / f
+                        dm = u if side > 0 else wdt - u
+                        rl = _sstep(pwr * 1.7, pwr * 0.5, dm) * (0.5 * ax * ax + 0.12) * (1.0 if lucky < 0.5 else 0.45)
+                        # round 14: the side away from the sun is a lost edge that melts into the haze
+                        dsh = wdt - dm
+                        lost = _sstep(pwr * 6.0, 0.0, dsh) * 0.4
+                        cr = cr * (1 - lost) + 0.3 * lost
+                        cg = cg * (1 - lost) + 0.29 * lost
+                        cb = cb * (1 - lost) + 0.42 * lost
+                        rt_ = _sstep(pwr * 1.4 + 0.1, 0.0, ytop - Y) * (0.45 * ax * ax + 0.08) * (1.0 if lucky < 0.35 else 0.0)
+                        rr_ = max(rl, rt_)
+                        cr += rr_ * 1.3
+                        cg += rr_ * 0.72
+                        cb += rr_ * 0.42
+                        # the parapet cap: a slightly lighter cool line on some roofs only
+                        # round 13: every roof line catches the open sky (the rooftop sea reads as stacked light
+                        # parapet lines, yn_07 / yn_08); warmer toward the afterglow
+                        kcap = 0.26 if lucky > 0.6 else 0.14
+                        cr += tl * kcap * (1.0 + 0.5 * ax)
+                        cg += tl * kcap * (0.95 + 0.2 * ax)
+                        cb += tl * kcap * (1.15 - 0.2 * ax)
+                    elif not twr and face == 1:
+                        # the sunward side wall: grazing warm light, top edge + far corner catch it
+                        cr += tl * (0.2 + 0.3 * lucky)
+                        cg += tl * (0.11 + 0.17 * lucky)
+                        cb += tl * 0.08
                         ce = _sstep(pw * 2.5 * zz / max(abs(x0), 1.0) + 0.6, 0.0, z1 - zz)
-                        gl = 1.0 if (mat == M_GLASS or mat == M_DARK) else 0.45
+                        gl = 0.8 if (mat == M_GLASS or mat == M_DARK) else 0.35
                         cr += ce * 1.1 * gl
                         cg += ce * 0.7 * gl
                         cb += ce * 0.4 * gl
-                        # round 6: bright edge line on the near (west) corner where the lit face turns away
-                        if hb > 45.0:
-                            fpx = zz / f * zz / max(abs(x0), 1.0)
-                            rl2 = _sstep(fpx * 1.6, fpx * 0.4, u) * (0.5 + 0.5 * _sstep(20.0, 150.0, Y))
-                            cr += rl2 * 1.5
-                            cg += rl2 * 1.05
-                            cb += rl2 * 0.6
-                            er += rl2 * 0.5
-                            eg += rl2 * 0.35
-                            eb += rl2 * 0.2
-                            if eon > -5.0 and rl2 > 0.3:
-                                eon = -10.0
-                            ew = max(ew, rl2 * 0.5)
-                        # round 5: warm sun glint on west-facing glass - a soft diagonal band of the afterglow
-                        # mirrored across the curtain wall, hottest high up, as HDR emission (blooms)
-                        if (not twr) and (mat == M_GLASS or mat == M_DARK or mat == M_CURTAIN or mat == M_FINS) and hb > 45.0:
+                        if (mat == M_GLASS or mat == M_DARK or mat == M_CURTAIN or mat == M_FINS) and hb > 45.0:
                             dpth = max(z1 - z0, 1.0)
                             q = (zz - z0) / dpth
                             hv = (Y - base) / max(hb - base, 1.0)
                             dg = q * 0.8 - hv + 0.55 + 0.25 * _hash(int(B[i, SEED]), 3, 1, 9)
                             band = math.exp(-(dg / 0.13) ** 2) * _sstep(0.2, 0.75, hv)
-                            gk = band * (0.75 if mat != M_FINS else 0.4)
+                            gk = band * (0.6 if mat != M_FINS else 0.3)
                             if gk > 0.01:
                                 cr += gk * 0.9
                                 cg += gk * 0.5
                                 cb += gk * 0.25
-                                er += gk * 1.3
-                                eg += gk * 0.72
-                                eb += gk * 0.32
+                                er += gk * 1.0
+                                eg += gk * 0.56
+                                eb += gk * 0.25
                                 if eon > -5.0:
                                     eon = -10.0
                                 ew = max(ew, gk)
-                                # round 6: hard white-gold sun glints on individual panes inside the band
-                                flg = B[i, FLH]
-                                byg = B[i, BAYW]
-                                sdg = int(B[i, SEED])
-                                hg = _hash(sdg, int(math.floor((Y - base) / flg)), int(math.floor(u / byg)) // 2, 97)
-                                if hg < 0.45 * gk:
-                                    pmk = _pulse(u - byg * 0.1, fu, byg, 0.0, byg * 0.8) *                                         _pulse(Y - base - flg * 0.2, fv, flg, 0.0, flg * 0.62)
-                                    cr += pmk * 1.2
-                                    cg += pmk * 0.95
-                                    cb += pmk * 0.6
-                                    er += pmk * 2.4
-                                    eg += pmk * 1.9
-                                    eb += pmk * 1.15
-                                    ew = max(ew, pmk)
-                    else:
-                        # the parapet top catches the open sky: a pale cool line along each roofline
-                        cr += tl * 0.3
-                        cg += tl * 0.28
-                        cb += tl * 0.34
+                    elif not twr and face == 2:
+                        cr += tl * 0.03
+                        cg += tl * 0.03
+                        cb += tl * 0.05
                     # vertical sign strips with glyphs
                     if face == 0 and B[i, SIGN] >= 1.0:
                         if _sign(u, v, fu, B[i], x0, x1, hb - base, tmp, VA, VN):
@@ -1331,17 +1767,18 @@ def render_band(B, order, bb, Hs, Ws, ss, x_off, y_off, cx, hy, f, cam_h, zmin, 
             hr, hg, hb2 = haze[hyp, hxp, 0], haze[hyp, hxp, 1], haze[hyp, hxp, 2]
             # the air in front of the backlit towers is a cool violet veil except near the afterglow
             ks = math.exp(-abs(sx - (cx + sun_xw * f)) / (0.18 * Wh)) * 0.8
-            cm = 0.55 * (1.0 - ks)
+            cm = 0.4 * (1.0 - ks)
             yw = max(yw_hit, 0.0)
             dd = max(zh - 700.0, 0.0) / fogZ
             # the veil gets lighter / bluer with distance (aerial perspective)
             dk = min(max((zh - 2000.0) / 5000.0, 0.0), 1.0)
             # round 6: the veil is a pink-lavender dusk haze that pales with distance (aerial perspective),
             # thicker low down between the mid-rise blocks
-            hr = hr * (1 - cm) + (0.4 + 0.2 * dk) * cm
-            hg = hg * (1 - cm) + (0.3 + 0.14 * dk) * cm
-            hb2 = hb2 * (1 - cm) + (0.56 + 0.14 * dk) * cm
-            fa = 1.0 - math.exp(-(0.1 * dd + 0.8 * dd ** 1.6 + 1.3 * dd * math.exp(-yw / 65.0)))
+            hr = hr * (1 - cm) + (0.24 + 0.14 * dk) * cm
+            hg = hg * (1 - cm) + (0.27 + 0.15 * dk) * cm
+            hb2 = hb2 * (1 - cm) + (0.38 + 0.16 * dk) * cm
+            # round 13: the near / mid blocks keep their material colours (the depth haze is laid per plate)
+            fa = 1.0 - math.exp(-(0.1 * dd + 0.55 * dd ** 1.6 + 0.3 * dd * math.exp(-yw / 65.0)))
             c0 = cr * (1 - fa) + hr * fa
             c1 = cg * (1 - fa) + hg * fa
             c2 = cb * (1 - fa) + hb2 * fa
@@ -1403,3 +1840,146 @@ def composite_band(img, em, occ, pm, E, on, top, shift, t):
                 em[y, x, c] = em[y, x, c] * (1 - a) + e
             if a > occ[y, x]:
                 occ[y, x] = a
+
+
+@njit(cache=True, parallel=True)
+def city_grade(img, cm, gw, gx0, kb):
+    """round 11: screen-space warm / cool split of the city (see Scene._city_grade), in place.
+    gw: padded sun-cone weight (H, Wp); gx0: its x offset this frame; kb: (H,) indigo base weight."""
+    H, W = img.shape[0], img.shape[1]
+    for y in prange(H):
+        kby = kb[y]
+        for x in range(W):
+            c = cm[y, x]
+            if c <= 1e-4:
+                continue
+            wc = gw[y, x + gx0]
+            r, g, b = img[y, x, 0], img[y, x, 1], img[y, x, 2]
+            lum = 0.3 * r + 0.55 * g + 0.15 * b
+            # the gold glass hits / sun-lit edges keep their colour (selective warm accents)
+            prot = min(max((r - b - 0.12) / 0.3, 0.0), 1.0) * min(max((lum - 0.22) / 0.25, 0.0), 1.0)
+            c = c * (1.0 - 0.85 * prot)
+            sk = 1.0 - 0.1 * (1.0 - wc)
+            r, g, b = lum + (r - lum) * sk, lum + (g - lum) * sk, lum + (b - lum) * sk
+            # round 13: the cool side is only a little deeper / bluer (it was one lilac-blue wash that ate
+            # the material colours)
+            # round 14: shade away from the sun is a saturated blue-violet (real warm / cool split);
+            # only the dark shadow values are pushed, the lit accents stay
+            dk = 0.86 + 0.14 * wc
+            shd = (1.0 - wc) * (1.0 - min(max((lum - 0.25) / 0.35, 0.0), 1.0))
+            r = r * (0.88 + 0.12 * wc - 0.08 * shd) * dk
+            g = g * (0.93 + 0.07 * wc - 0.1 * shd) * dk
+            b = b * (1.05 - 0.05 * wc + 0.14 * shd) * dk
+            pk = 0.3 * wc * (0.35 + 0.65 * min(lum * 2.5, 1.0))
+            r = r * (1.0 - 0.3 * wc) + 1.0 * pk
+            g = g * (1.0 - 0.3 * wc) + 0.66 * pk
+            b = b * (1.0 - 0.3 * wc) + 0.42 * pk
+            r = r * (1.0 - kby * 0.5)
+            g = g * (1.0 - kby * 0.48)
+            b = b * (1.0 - kby * 0.2)
+            img[y, x, 0] = img[y, x, 0] * (1.0 - c) + r * c
+            img[y, x, 1] = img[y, x, 1] * (1.0 - c) + g * c
+            img[y, x, 2] = img[y, x, 2] * (1.0 - c) + b * c
+
+
+@njit(cache=True, parallel=True)
+def sun_compress(img, scw, gx0, keep, use_keep):
+    """per-channel highlight shoulder around the sun (see Scene._sun_compress), in place"""
+    H, W = img.shape[0], img.shape[1]
+    k0, top = 0.75, 0.42
+    for y in prange(H):
+        for x in range(W):
+            wm = scw[y, x + gx0]
+            if use_keep:
+                wm = wm * (1.0 - 0.85 * min(max(keep[y, x], 0.0), 1.0))
+            if wm < 1e-4:
+                continue
+            for c in range(3):
+                v = img[y, x, c]
+                d = v - k0
+                if d > 0.0:
+                    f = v - d + d / (1.0 + d / top)
+                    img[y, x, c] = v * (1.0 - wm) + f * wm
+
+
+@njit(cache=True, parallel=True)
+def add_layer(img, lay, gx0, cl, k):
+    """img += lay[:, gx0:gx0+W] * (1 - k * cl)"""
+    H, W = img.shape[0], img.shape[1]
+    for y in prange(H):
+        for x in range(W):
+            m = 1.0 - k * cl[y, x]
+            for c in range(3):
+                img[y, x, c] += lay[y, x + gx0, c] * m
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# round 13: fused per-frame post kernels (frame budget)
+@njit(cache=True, fastmath=True, parallel=True)
+def post_add(img, em, gup, sh, ca, fga, glare, gx0):
+    """img += em + gup + (sh * (1 - .75 ca) + glare * .45 * (1 - .6 ca)) * (1 - .7 fga), in place"""
+    H, W = img.shape[0], img.shape[1]
+    for y in prange(H):
+        for x in range(W):
+            c_ = ca[y, x]
+            nk = 1.0 - 0.7 * min(max(fga[y, x], 0.0), 1.0)
+            k1 = (1.0 - 0.75 * c_) * nk
+            k2 = 0.45 * (1.0 - 0.6 * c_) * nk
+            for c in range(3):
+                img[y, x, c] += em[y, x, c] + gup[y, x, c] + sh[y, x, c] * k1 + glare[y, x + gx0, c] * k2
+
+
+@njit(cache=True, fastmath=True)
+def _shl(v, s, k):
+    if v > s:
+        o = v - s
+        return s + k * o / (o + k)
+    return v
+
+
+@njit(cache=True, fastmath=True, parallel=True)
+def shoulder2(img, hv, s1, d1, s2, d2):
+    """F.shoulder(img, s1, d1) * (1 - hv) + F.shoulder(img, s2, d2) * hv in one pass (in place)"""
+    H, W = img.shape[0], img.shape[1]
+    k1, k2 = 1.0 - s1, 1.0 - s2
+    for i in prange(H):
+        for j in range(W):
+            h = hv[i, j]
+            m = 0.0
+            for c in range(3):
+                v = max(img[i, j, c], 0.0)
+                if v > m:
+                    m = v
+            wd1 = min(max((m - 1.0) / 1.5, 0.0), 1.0) * d1
+            wd2 = min(max((m - 1.0) / 1.5, 0.0), 1.0) * d2
+            a0 = _shl(max(img[i, j, 0], 0.0), s1, k1)
+            a1 = _shl(max(img[i, j, 1], 0.0), s1, k1)
+            a2 = _shl(max(img[i, j, 2], 0.0), s1, k1)
+            b0 = _shl(max(img[i, j, 0], 0.0), s2, k2)
+            b1 = _shl(max(img[i, j, 1], 0.0), s2, k2)
+            b2 = _shl(max(img[i, j, 2], 0.0), s2, k2)
+            ya = max(a0, max(a1, a2))
+            yb = max(b0, max(b1, b2))
+            a0, a1, a2 = a0 * (1 - wd1) + ya * wd1, a1 * (1 - wd1) + ya * wd1, a2 * (1 - wd1) + ya * wd1
+            b0, b1, b2 = b0 * (1 - wd2) + yb * wd2, b1 * (1 - wd2) + yb * wd2, b2 * (1 - wd2) + yb * wd2
+            img[i, j, 0] = a0 * (1 - h) + b0 * h
+            img[i, j, 1] = a1 * (1 - h) + b1 * h
+            img[i, j, 2] = a2 * (1 - h) + b2 * h
+
+
+@njit(cache=True, fastmath=True, parallel=True)
+def paper_bloom(img, paper, occ, occ_sky, base, gup, gk):
+    """paper surface (mid-tone weighted multiply, weight base..1 by the painted-city coverage) + a gentle
+    overall bloom (gup upsampled glow * gk), in place"""
+    H, W = img.shape[0], img.shape[1]
+    for y in prange(H):
+        for x in range(W):
+            cm = min(max(occ[y, x] - occ_sky[y, x], 0.0), 1.0)
+            tex = (paper[y, x] - 1.0) * (base + (1.0 - base) * cm)
+            r, g, b = img[y, x, 0], img[y, x, 1], img[y, x, 2]
+            lum = 0.3 * r + 0.55 * g + 0.15 * b
+            w = min(max(4.0 * lum * (1.2 - lum), 0.25), 1.0)
+            f = 1.0 + tex * w
+            img[y, x, 0] = r * f + gup[y, x, 0] * gk
+            img[y, x, 1] = g * f + gup[y, x, 1] * gk
+            img[y, x, 2] = b * f + gup[y, x, 2] * gk

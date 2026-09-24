@@ -18,7 +18,7 @@ WORDS_H = ['薬局', '喫茶', '花屋', '書店', '歯科', '銭湯', 'そば',
            'さくら', '花見', '和菓子', '居酒屋', '不動産', '美容室', 'ラーメン', 'パン屋', '桜まつり', '弁当']
 # round 8: small boards only get simple, open glyphs (kana / few-stroke kanji) that stay legible at 15-25 px
 SIMPLE_H = ['そば', 'さくら', 'パン', 'カフェ', 'うどん', 'すし', '本屋', 'くすり', 'たばこ']
-SIMPLE_V = ['そば', 'すし', 'くすり', 'うどん', 'たばこ', 'パン']
+SIMPLE_V = ['そば', 'すし', 'パン', '甘味', '団子']     # round 19: short words only (never clipped)
 WORDS_V = ['薬局', '喫茶', '歯科', '書店', '花屋', '銭湯', 'そば', '旅館', '眼科', '居酒屋', '不動産', '和菓子']
 
 
@@ -79,6 +79,7 @@ def paint_signs(out, bid, face, uo, Yo, so, B, ss, min_px=60, seed=3, wscale=1.0
     vv = 0
     h0 = int(rng.integers(0, len(WORDS_H)))
     v0 = int(rng.integers(0, len(WORDS_V)))
+    used_v = set()
     for i in ids:
         u0, u1, Y0, Y1, s0, s1 = B[i, :6]
         bx0, bx1 = int(max(0, B[i, 12])), int(min(Ws, B[i, 13] + 1))
@@ -126,11 +127,44 @@ def paint_signs(out, bid, face, uo, Yo, so, B, ss, min_px=60, seed=3, wscale=1.0
             continue
         if glyph_px < 26.0:
             if vertical:
-                word = SIMPLE_V[(int(i) * 7 + v0) % len(SIMPLE_V)]
+                j0 = (int(i) * 7 + v0) % len(SIMPLE_V)
+                for dj in range(len(SIMPLE_V)):
+                    word = SIMPLE_V[(j0 + dj) % len(SIMPLE_V)]
+                    if word not in used_v:
+                        break
+                used_v.add(word)
             else:
                 nmax = int(np.clip(round(width / max(height, 1e-3) * 0.85), 2, 3))
                 cands = [w_ for w_ in SIMPLE_H if len(w_) <= nmax]
                 word = cands[(int(i) * 5 + h0) % len(cands)]
+        # round 19: a board partly covered at one end (balcony slab, eave ...) -> letter only the clear run of
+        # rows so the word is never clipped
+        Yt_, Yb_ = Y1, Y0
+        rowcov = mm.mean(1)
+        good = rowcov > 0.8 * rowcov.max()
+        if vertical and not good.all():
+            best, cur, st_, bst = 0, 0, 0, (0, len(good))
+            for r_, g_ in enumerate(list(good) + [False]):
+                if g_:
+                    if cur == 0:
+                        st_ = r_
+                    cur += 1
+                else:
+                    if cur > best:
+                        best, bst = cur, (st_, r_)
+                    cur = 0
+            if best < 0.45 * len(good):
+                continue
+            ra, rb = bst
+            Ysub = Yo[y0:y1, x0:x1]
+            Yt_ = float(np.median(Ysub[ra][mm[ra]])) if mm[ra].any() else Y1
+            Yb_ = float(np.median(Ysub[rb - 1][mm[rb - 1]])) if mm[rb - 1].any() else Y0
+            if Yt_ - Yb_ < 0.3 * height:
+                continue
+            height = Yt_ - Yb_
+            mm = mm & good[:, None]
+            if vertical and height < width * 1.3:
+                continue
         tex = _text_img(word, vertical, width / max(height, 1e-3))
         th, tw = tex.shape
         # board margins (frame) -> text lives in the inner 90%
@@ -139,7 +173,7 @@ def paint_signs(out, bid, face, uo, Yo, so, B, ss, min_px=60, seed=3, wscale=1.0
             tx = 1 - tx if fsign > 0 else tx
         else:
             tx = tx if fsign > 0 else 1 - tx
-        ty = (Y1 - Yo[y0:y1, x0:x1]) / height
+        ty = (Yt_ - Yo[y0:y1, x0:x1]) / height
         mapx = np.clip(tx * tw, 0, tw - 1).astype(np.float32)
         mapy = np.clip(ty * th, 0, th - 1).astype(np.float32)
         # prefilter the text to the local pixel footprint (sign seen small / at an angle)

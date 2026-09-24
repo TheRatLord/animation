@@ -6,12 +6,17 @@ from numba import njit, prange
 import s09_classroom_rt as R
 
 
-def make_dust(n, seed=11):
+def make_dust(n, seed=11, pos=None):
     rng = np.random.default_rng(seed)
+    if pos is not None:
+        n = len(pos)
     P = np.zeros((n, 10), np.float64)
-    P[:, 0] = rng.uniform(0.8, 8.5, n)
-    P[:, 1] = rng.uniform(0.3, 2.8, n)
-    P[:, 2] = rng.uniform(0.3, 6.2, n)
+    if pos is not None:
+        P[:, 0:3] = pos
+    else:
+        P[:, 0] = rng.uniform(0.8, 8.5, n)
+        P[:, 1] = rng.uniform(0.3, 2.8, n)
+        P[:, 2] = rng.uniform(0.3, 6.2, n)
     P[:, 3:6] = rng.normal(0, 1, (n, 3)) * np.array([0.012, 0.006, 0.012])   # slow drift m/s
     P[:, 3] -= 0.01                                                            # gentle breeze
     P[:, 4] += 0.004                                                           # warm air rising
@@ -46,15 +51,18 @@ def dust(img, depth, cam, fpx, P, t, L, VB, HB, CM, cm_ppm, cm_y0, sunc, k):
             continue
         dist = math.sqrt(rx * rx + ry * ry + rz * rz)
         # size: a tiny point far away, a soft out-of-focus disc when close to the lens
-        rad = max(0.6, 0.0011 * W * (1.0 / zc) * 1.6)
-        blurr = abs(zc - 3.5) * 0.0009 * W
+        rad = max(0.75 * W / 1920.0 + 0.25, 0.0011 * W * (1.0 / zc) * 1.6)
+        blurr = abs(zc - 5.0) * 0.00045 * W
         rad = max(rad, blurr)
         inten = a * P[i, 9] * k * min(1.0, 1.2 / (rad * rad) * 1.0 + 0.0) * 1.4
         if rad > 2.0:
             inten = a * P[i, 9] * k * 0.55 * (2.0 / rad) ** 1.2
+        # soft bloom halo around each mote (a wide faint glow)
+        hr = max(rad * 3.5, 3.0 * W / 1920.0)
+        hi = inten * 0.06 * min(1.0, 2.0 / rad)
         tw_ = 0.6 + 0.4 * math.sin(t * 3.0 + P[i, 6] * 5.0)        # glitter as they tumble
         inten *= tw_
-        R_ = int(rad * 2.0) + 2
+        R_ = int(max(rad * 2.0, hr * 1.6)) + 2
         x0, y0 = int(sx), int(sy)
         for yy in range(max(0, y0 - R_), min(H, y0 + R_ + 1)):
             for xx in range(max(0, x0 - R_), min(W, x0 + R_ + 1)):
@@ -62,14 +70,16 @@ def dust(img, depth, cam, fpx, P, t, L, VB, HB, CM, cm_ppm, cm_y0, sunc, k):
                     continue
                 d2 = ((xx + 0.5 - sx) ** 2 + (yy + 0.5 - sy) ** 2) / (rad * rad)
                 if rad > 2.0:
-                    w = min(1.0, max(0.0, (1.15 - math.sqrt(d2)) * 4.0)) * (0.75 + 0.25 * d2)
+                    w = min(1.0, max(0.0, (1.1 - math.sqrt(d2)) * 3.0)) * (0.85 + 0.15 * d2)
                 else:
                     w = math.exp(-d2 * 1.5)
+                d2h = ((xx + 0.5 - sx) ** 2 + (yy + 0.5 - sy) ** 2) / (hr * hr)
+                w = w * inten + math.exp(-d2h * 2.0) * hi
                 if w <= 0:
                     continue
-                img[yy, xx, 0] += w * inten * sunc[0]
-                img[yy, xx, 1] += w * inten * sunc[1]
-                img[yy, xx, 2] += w * inten * sunc[2]
+                img[yy, xx, 0] += w * sunc[0]
+                img[yy, xx, 1] += w * sunc[1]
+                img[yy, xx, 2] += w * sunc[2]
 
 
 @njit(parallel=True, fastmath=True, cache=True)
@@ -198,9 +208,9 @@ def hex_ghosts(W, H, lx, ly, seed=5):
     out = np.zeros((H, W, 3), np.float32)
     cx, cy = W / 2, H / 2
     vx, vy = cx - lx, cy - ly
-    spec = [(0.45, 0.016, (0.5, 0.9, 1.0), 0.10), (0.78, 0.034, (0.6, 1.0, 0.7), 0.07),
-            (1.25, 0.022, (1.0, 0.7, 0.45), 0.10), (1.6, 0.06, (0.55, 0.65, 1.0), 0.05),
-            (1.95, 0.03, (1.0, 0.55, 0.85), 0.08), (2.35, 0.012, (0.8, 1.0, 0.9), 0.12)]
+    # small ghosts only, none over the focal furniture in the lower middle of the frame
+    spec = [(0.45, 0.011, (0.5, 0.9, 1.0), 0.09), (0.78, 0.018, (0.6, 1.0, 0.7), 0.06),
+            (1.25, 0.012, (1.0, 0.7, 0.45), 0.08), (1.62, 0.007, (0.55, 0.65, 1.0), 0.07)]
     ss = 2
     for k, r, col, amt in spec:
         gx, gy = lx + vx * k, ly + vy * k

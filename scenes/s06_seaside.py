@@ -28,13 +28,24 @@ import s06_seaside_near as NEAR  # noqa: E402
 import s06_seaside_sky as SKY  # noqa: E402
 import s06_seaside_sky3 as SK2  # noqa: E402
 import s06_seaside_wires as WI  # noqa: E402
+import s06_seaside_rays as FX2  # noqa: E402
 
 DURATION = 5.0
 
 HZ = 0.53        # horizon (fraction of H)
 SUN = (0.655, 0.445)   # sun position in frame at cam=0 (fractions)
-TRUCK = 1.4      # lateral camera travel over the shot (m)
-PAN = 0.028      # counter-pan (fraction of W) - pivots the move around ~35 m
+TRUCK = 0.0      # (no lateral truck: this shot is the edit's crane / tilt-down)
+ZOOM = 1.0
+PAN = 0.0
+PUSH = 0.0
+# eased crane-down + tilt: the shot opens framed on the sunset cumulus and sinks onto the road curve.
+# A point at inverse depth iz sits  (1 - e(t)) * (TILT_V + CRANE_K * iz)  px (at 1080p) lower than its
+# final position: sky / sea / islands ~130 px (pure tilt), the road mid-distance ~300 px, the pole / fence /
+# pampas ~600-800 px (crane parallax, ~2.5x the road and ~6x the sea).
+TILT_V = 170.0
+CRANE_K = 3000.0
+E_TOP = 0.45     # extra plate height above the frame (fraction of H) revealed at the start of the tilt
+NEAR_T = 0.8     # extra near-canvas height above the frame (fraction of H)
 Z_FAR = 350.0    # headland / lighthouse distance (m)
 # deeper sunset cumulus palette (clouds2 'sunset' pushed toward orange / rose, violet shadows)
 SUNSET = dict(hi=(1.0, 0.84, 0.62), lit=(1.0, 0.64, 0.4), lit_lo=(0.96, 0.5, 0.5), mid='#d86a92', shade='#8270c2',
@@ -65,8 +76,12 @@ class Scene:
     def __init__(self, W, H):
         self.W, self.H = W, H
         self.HZ = HZ
-        self.pw, self.ph = pw, ph = int(W * 1.2), int(H * 1.08)
-        self.ox, self.oy = ox, oy = (pw - W) / 2, (ph - H) / 2
+        ph0 = int(H * 1.08)
+        self.E = E = int(round(E_TOP * H))
+        self.pw, self.ph = pw, ph = int(W * 1.2), ph0 + E
+        self.ph0 = ph0
+        self.ox, self.oy = ox, oy = (pw - W) / 2, (ph0 - H) / 2 + E
+        self.tv, self.kc = TILT_V * H / 1080.0, CRANE_K * H / 1080.0
         self.hzp = HZ * H + oy
         self.f = 0.95 * W
         self.hc = 5.0
@@ -92,8 +107,13 @@ class Scene:
     def _build_sky(self):
         W, H, pw, ph = self.W, self.H, self.pw, self.ph
         hzp = self.hzp / ph
-        preset = dict(stops=[(0.0, '#1b2f86'), (0.2, '#2b48a8'), (0.4, '#5a62bc'), (0.56, '#9a74c0'),
-                             (0.7, '#e880a4'), (0.82, '#ff9478'), (0.92, '#ffac66'), (1.0, '#ffc47e')],
+        # stops placed at the same absolute rows as on the nominal plate (the plate grew by E on top),
+        # with a deeper zenith blue in the extension revealed at the start of the tilt
+        hy0 = self.hzp - self.E
+        st0 = [(0.0, '#1b2f86'), (0.2, '#2b48a8'), (0.4, '#5a62bc'), (0.56, '#9a74c0'),
+               (0.7, '#e880a4'), (0.82, '#ff9478'), (0.92, '#ffac66'), (1.0, '#ffc47e')]
+        stops = [(0.0, '#101c62'), (0.55 * self.E / self.hzp, '#16277a')] +             [((p_ * hy0 + self.E) / self.hzp, c_) for p_, c_ in st0]
+        preset = dict(stops=stops,
                       sun_glow='#ffb05a', sun_glow_amt=0.15, below='#ffcc80', band=('#ffe0a0', 0.2))
         self.sky = S.sky_gradient(pw, ph, preset, horizon=hzp, sun=self.sun_p, sun_radius=0.5)
         sp = self.sun_p
@@ -115,7 +135,9 @@ class Scene:
         self.bank = K.horizon_bank_plate(pw, ph, self.hzp + 0.002 * ph, 0.03 * ph, sun=sp, preset='sunset', seed=12,
                                          rows=3, haze=0.35, haze_color='#ffc890', sun_z=-0.05, shrink=0.5)
         self.far_sky = _over4(self.bank, self.cl_far)      # horizon bank + stratus drift together
-        self.cirrus = K.cirrus_plate(pw, ph, preset='sunset', seed=4, region=(0.02, 0.3), angle=-4, density=0.45,
+        self.cirrus = K.cirrus_plate(pw, ph, preset='sunset', seed=4,
+                                     region=((0.02 * self.ph0 + self.E) / ph * 0.6, (0.3 * self.ph0 + self.E) / ph),
+                                     angle=-4, density=0.45,
                                      opacity=0.45)
 
     # ------------------------------------------------------------------ sea (static parts)
@@ -157,8 +179,8 @@ class Scene:
         nb = NEAR.Near(self)
         self.nearb = nb
         self.near = nb.build()
-        self.rows = {k: self.rows_of(d[k], self.oy, H) for k in ('road', 'grass', 'rail', 'hill', 'poles')}
-        self.rows.update({k: self.rows_of(self.near[k], 0, H) for k in ('back', 'front')})
+        self.rows = {k: self.rows_of(d[k], self.oy, H) for k in ('road', 'grass', 'rail', 'hill', 'tree', 'poles')}
+        self.rows.update({k: self.rows_of(self.near[k], nb.T, H) for k in ('back', 'front')})
         # compositing darkening of the lower-left foreground (frames the luminous background)
         xs_, ys_ = C.grid(self.W, self.H)
         dd = np.sqrt((xs_ / self.W / 0.75) ** 2 + ((self.H - ys_) / self.H / 0.75) ** 2)
@@ -166,6 +188,9 @@ class Scene:
         self.fg_dark *= (1 - 0.1 * C.smoothstep(0.8, 1.0, ys_ / self.H))[..., None]
         self.mote_r = np.random.default_rng(99).random((26, 7))
         self.bird_col = S.bird_color(self.sky[int(0.35 * self.ph), int(0.55 * self.pw)], darkness=0.7)
+        vx, vy = self.landb.P(self.landb.SV, -L.HALF, 0)
+        self.zoom_c = (float(vx - self.ox) * 0.6 + 0.4 * 0.5 * W, float(vy - self.oy))
+        self.rays = FX2.RayFan(W, H, seed=5)
         self.flare = FX.Flare(self.W, self.H, tint=(1.0, 0.72, 0.45))
         self.flare.amts = [a * 2.3 for a in self.flare.amts]          # a readable (still subtle) ghost chain
         # upper-left sky mask for the wide shafts (above the horizon, left of the sun)
@@ -182,10 +207,23 @@ class Scene:
 
     # ------------------------------------------------------------------ camera
     def cam(self, t):
-        """-> (pan px, K px*m, T m): a point at inverse depth iz is displaced by pan + K * iz."""
+        """-> (pan px, K px*m, T m, D m). A plate point (nominal frame px x, y) at inverse depth iz lands at
+        x' = cx + (x - cx + K iz) s + pan,  y' = hz + (y - hz) s,  s = 1 / (1 - D iz)
+        (lateral truck T, forward dolly D, camera turn pan)."""
         u = ease(t / DURATION)
-        T = (u - 0.5) * TRUCK
-        return (u - 0.5) * PAN * self.W, -self.f * T, T
+        T = -(u - 0.5) * TRUCK
+        return (u - 0.5) * PAN * self.W, -self.f * T, T, u * PUSH
+
+    def vcam(self, t):
+        """-> (vy px, Ky px*m): a point at inverse depth iz is displaced down by vy + Ky * iz."""
+        e = 1.0 - ease(t / DURATION)
+        return e * self.tv, e * self.kc
+
+    def xf(self, x, y, iz, pan, K, D):
+        """nominal frame coords (cam = 0) of a point at inverse depth iz -> frame coords now."""
+        cx, hz = self.W / 2.0, HZ * self.H
+        s = 1.0 / np.maximum(1.0 - D * np.asarray(iz, np.float64), 0.2)
+        return cx + (np.asarray(x) - cx + K * np.asarray(iz)) * s + pan, hz + (np.asarray(y) - hz) * s, s
 
     @staticmethod
     def rows_of(plate, oy, H):
@@ -193,39 +231,59 @@ class Scene:
         r = np.where(plate[..., 3].max(1) > 1e-3)[0]
         if len(r) == 0:
             return (0, 0)
-        return (int(max(r[0] - oy - 2, 0)), int(min(r[-1] - oy + 3, H)))
+        return (int(r[0] - oy - 2), int(r[-1] - oy + 3))       # unclipped: the crane shifts them
 
-    def comp(self, img, plate, iz, pan, K, ox, oy, rows, sway=None, t=0.0):
-        """warp a plate (only its rows) and composite it over img in place."""
+    def comp(self, img, plate, iz, pan, K, ox, oy, rows, sway=None, t=0.0, D=0.0, V=(0.0, 0.0)):
+        """warp a plate (only its rows) and composite it over img in place. V = (vy, Ky) crane / tilt."""
         r0, r1 = rows
+        vy, Ky = V
+        izm = float(iz) if np.isscalar(iz) else self._izmax(iz)
+        izn = float(iz) if np.isscalar(iz) else 0.0
+        r0 = int(max(math.floor(r0 + vy + Ky * izn) - 3, 0))
+        r1 = int(min(math.ceil(r1 + vy + Ky * izm) + 3, self.H))
         if r1 <= r0:
             return img
         if sway is None:
-            L_ = self.warp(plate, iz, pan, K, ox, oy, r=(r0, r1))
+            L_ = self.warp(plate, iz, pan, K, ox, oy, r=(r0, r1), V=V)
         else:
             wmap, kw = sway
-            L_, wm = self.warp(plate, iz, pan, K, ox, oy, extra=(wmap,), r=(r0, r1))
-            L_ = self.sway(L_, wm, t, y0=r0, **kw)
+            kw = dict(kw)
+            fn = kw.pop('fn', self.sway)
+            L_, wm = self.warp(plate, iz, pan, K, ox, oy, extra=(wmap,), r=(r0, r1), V=V)
+            L_ = fn(L_, wm, t, y0=r0, **kw)
         img[r0:r1] = F.over_rgba(img[r0:r1], L_)
         return img
 
-    def warp(self, plate, iz, pan, K, ox, oy, extra=(), r=None):
-        """per-pixel truck warp of a plate with its inverse-depth field (2 fixed-point iterations)."""
+    def _izmax(self, iz):
+        if not hasattr(self, '_izm'):
+            self._izm = {}
+        k = id(iz)
+        if k not in self._izm:
+            self._izm[k] = float(iz.max())
+        return self._izm[k]
+
+    def warp(self, plate, iz, pan, K, ox, oy, extra=(), r=None, V=(0.0, 0.0)):
+        """per-pixel parallax warp of a plate with its inverse-depth field: a point at inverse depth iz
+        lands at x + pan + K iz, y + vy + Ky iz (fixed-point iterations, iz sampled at the source)."""
         W = self.W
         r0, r1 = (0, self.H) if r is None else r
         H = r1 - r0
-        oxi, oyi = int(round(ox)), int(round(oy)) + r0
-        xs = np.arange(W, dtype=np.float32)[None] + ox
-        ys = np.ascontiguousarray(np.broadcast_to(np.arange(r0, r1, dtype=np.float32)[:, None] + oy, (H, W)))
+        vy, Ky = V
+        bx = np.float32(ox - pan) + np.arange(W, dtype=np.float32)[None]
+        by = np.float32(oy - vy) + np.arange(r0, r1, dtype=np.float32)[:, None]
         if np.isscalar(iz):
-            mx = np.ascontiguousarray(np.broadcast_to(xs - pan - K * iz, (H, W)), np.float32)
+            mx = np.ascontiguousarray(np.broadcast_to(bx - K * iz, (H, W)), np.float32)
+            my = np.ascontiguousarray(np.broadcast_to(by - Ky * iz, (H, W)), np.float32)
         else:
-            iz0 = iz[oyi:oyi + H, oxi:oxi + W]
-            mx = (xs - pan - K * iz0).astype(np.float32)
-            for _ in range(1):
-                izs = cv2.remap(iz, mx, ys, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-                mx = (xs - pan - K * izs).astype(np.float32)
-        out = [cv2.remap(p, mx, ys, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            K32, Ky32 = np.float32(K), np.float32(Ky)
+            mx = np.ascontiguousarray(np.broadcast_to(bx, (H, W)), np.float32)
+            my = np.ascontiguousarray(np.broadcast_to(by, (H, W)), np.float32)
+            its = 3 if abs(Ky) > 1e-3 or abs(K) > 1e-3 else 0
+            for _ in range(its):
+                izs = cv2.remap(iz, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+                mx = bx - K32 * izs
+                my = by - Ky32 * izs
+        out = [cv2.remap(p, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
                for p in (plate,) + tuple(extra)]
         return out if extra else out[0]
 
@@ -261,6 +319,35 @@ class Scene:
         return cv2.remap(rgba, mx.astype(np.float32), np.broadcast_to(my, mx.shape).astype(np.float32),
                          cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
 
+    def sway_clusters(self, rgba, wmap, t, amp=2.2, freq=1.1, y0=0):
+        """per-leaf-cluster wind sway: wmap = (weight, cluster id 0..1). Each clump gets its own phase and
+        amplitude (smoothly blended across clump borders, so the leaves never tear); 1-3 px at 1080p, with a
+        slow gust envelope. Pure displacement of the painted plate: temporally coherent, no shimmer."""
+        H = rgba.shape[0]
+        cols = np.nonzero(wmap[..., 0].max(0) > 1e-3)[0]
+        if len(cols) == 0:
+            return rgba
+        pad = int(4 * amp) + 2
+        c0, c1 = max(int(cols[0]) - pad, 0), min(int(cols[-1]) + pad + 1, rgba.shape[1])
+        out = rgba.copy()
+        rgba, wmap = np.ascontiguousarray(rgba[:, c0:c1]), wmap[:, c0:c1]
+        W = c1 - c0
+        w = np.clip(wmap[..., 0], 0, 1)
+        cid = wmap[..., 1]
+        u = self.H / 1080.0
+        ph = cid * 6.2832 * 3.0
+        gust = 0.75 + 0.25 * math.sin(t * 0.7 + 0.4)
+        a = amp * u * (0.55 + 0.45 * cid) * gust * w
+        dx = a * (np.sin(t * freq * 6.2832 / 4.0 * 2.0 + ph) * 0.75 + 0.25 * np.sin(t * freq * 2.9 + ph * 1.7))
+        dy = 0.35 * a * np.sin(t * freq * 2.3 + ph + 1.3)
+        xs = np.arange(W, dtype=np.float32)[None]
+        ys = np.arange(H, dtype=np.float32)[:, None]
+        mx = (xs - dx).astype(np.float32)
+        my = np.minimum(ys - dy, H - 1).astype(np.float32)
+        out[:, c0:c1] = cv2.remap(rgba, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT,
+                                  borderValue=(0, 0, 0, 0))
+        return out
+
     def halation_src(self, img):
         """bright-pass of the background at 1/4 res, spread wide (two radii), warm tinted -> full-res add."""
         W, H = self.W, self.H
@@ -281,7 +368,7 @@ class Scene:
             xs = np.arange(-W, W + 1, dtype=np.float32)[None]
             ys = np.arange(-40, 41, dtype=np.float32)[:, None] * u
             prof = np.exp(-(ys / (1.6 * u)) ** 2) * 0.7 + np.exp(-(ys / (6 * u)) ** 2) * 0.3
-            fall = 0.6 * np.exp(-np.abs(xs) / (0.12 * W)) + 0.4 * np.exp(-np.abs(xs) / (0.4 * W))
+            fall = 0.7 * np.exp(-np.abs(xs) / (0.1 * W)) + 0.3 * np.exp(-np.abs(xs) / (0.2 * W))
             self._streak = (prof * fall)[..., None] * np.array([0.5, 0.34, 0.22], np.float32) * 0.8
             self._streak = self._streak.astype(np.float32)
         out = np.zeros((H, W, 3), np.float32)
@@ -295,11 +382,11 @@ class Scene:
             out[y0:y1] = st[y0 - (yi - hh):y1 - (yi - hh), xi:xi + W]
         return out
 
-    def motes(self, img, t, shift):
+    def motes(self, img, t, shift, vshift=0.0):
         W, H = self.W, self.H
         r = self.mote_r
         x = (r[:, 0] * 1.3 - 0.15) * W + shift * 1.3 + np.sin(t * r[:, 2] + r[:, 3] * 6) * 0.01 * W + t * r[:, 4] * 0.01 * W
-        y = r[:, 1] * H - t * r[:, 5] * 0.012 * H + np.cos(t * r[:, 2] * 0.7 + r[:, 3] * 5) * 0.008 * H
+        y = r[:, 1] * H + vshift * 1.2 - t * r[:, 5] * 0.012 * H + np.cos(t * r[:, 2] * 0.7 + r[:, 3] * 5) * 0.008 * H
         tw = 0.5 + 0.5 * np.sin(t * (1 + r[:, 2]) + r[:, 3] * 9)
         # brighter toward the sun side
         sunw = np.exp(-((x - SUN[0] * W) / (0.35 * W)) ** 2)
@@ -327,45 +414,60 @@ class Scene:
     # ------------------------------------------------------------------ frame
     def frame(self, t):
         W, H = self.W, self.H
-        pan, Kt, T = self.cam(t)
-        img = self.sample(self.sky_sun, pan, 1.0, 1.0)
+        pan, Kt, T, Dp = self.cam(t)
+        vy, Ky = self.vcam(t)
+        V = (vy, Ky)
+        img = self.sample(self.sky_sun, pan, 1.0, 1.0, dy=vy)
         occ = None
         for pl, sp, is_occ in ((self.cirrus, 0.002, False), (self.far_sky, 0.0008, True),
                                (self.cl_near, 0.0022, True)):
-            Ls = self.sample(pl, pan + sp * W * t, 1.0, 1.0)
+            Ls = self.sample(pl, pan + sp * W * t, 1.0, 1.0, dy=vy)
             img = F.over_rgba(img, Ls)
             if is_occ:
                 occ = Ls[..., 3] if occ is None else np.maximum(occ, Ls[..., 3])
-        sx, sy = self.sun_p[0] - self.ox + pan, self.sun_p[1] - self.oy
+        sx, sy = self.sun_p[0] - self.ox + pan, self.sun_p[1] - self.oy + vy
+        hzf = HZ * H + vy
         # crepuscular rays fanning out through the gaps between clouds
-        img += F.light_shafts(W, H, sx, sy, occluder=occ, strength=0.2, length=0.95, radius=0.09,
+        img += F.light_shafts(W, H, sx, sy, occluder=occ, strength=0.16, length=0.95, radius=0.09,
                               tint=(1.0, 0.7, 0.45), t=t)
-        # faint wide shafts reaching up-left past the left cumulus (static pattern, slow breathing)
-        img += self.shaft_mask * (0.85 + 0.15 * math.sin(t * 0.7)) * F.light_shafts(
-            W, H, sx, sy, occluder=occ, strength=0.15, length=1.0, radius=0.3, tint=(1.0, 0.72, 0.5), t=t,
-            streaks=0.35, n_beams=6, hollow=0.6)
-        hzf = HZ * H
+        # painted god-ray wedges: a few broad soft bands radiating from the sun across the sky and down
+        # through the gaps of the cumulus (laid over sky + clouds, faded below the horizon)
+        img += self.rays.render(sx, sy, hzf, t, occ)
         img = np.ascontiguousarray(img)
-        self.seaR.render_fast(img, t, hzf, pan, 1.0, self.ox, self.oy, sx, self.refl, cc('#1c2c78'), cc('#ffb060'),
-                              shear=-T / self.hc)
-        gx, gy, gs, gi = self.seaR.glint_params(t, sx, hzf, H * 0.95)
+        self.seaR.render_fast(img, t, hzf, pan, 1.0, self.ox, self.oy - vy, sx, self.refl, cc('#1c2c78'),
+                              cc('#ffb060'), shear=-T / self.hc)
+        # the open sea away from the sun path keeps a hint of teal (not an all-mauve plane); the sun column
+        # and the glitter stay warm
+        y0s = int(max(math.ceil(hzf), 0))
+        if y0s < H:
+            xs_ = np.arange(W, dtype=np.float32)[None]
+            ys_ = np.arange(y0s, H, dtype=np.float32)[:, None]
+            dcol = (ys_ - hzf) / max(H - hzf, 1.0)
+            wid = 0.07 * W + 0.5 * W * dcol
+            away = 1 - np.exp(-((xs_ - sx) / wid) ** 2)
+            a_ = (away * (0.35 + 0.65 * C.smoothstep(0.0, 0.25, dcol)))[..., None]
+            img[y0s:] *= 1 + a_ * np.array([-0.26, 0.08, 0.02], np.float32)
+            warm = (1 - away) * C.smoothstep(0.0, 0.1, dcol)
+            img[y0s:] *= 1 + warm[..., None] * np.array([0.08, 0.03, -0.06], np.float32)
+        gx, gy, gs, gi = self.seaR.glint_params(t, sx, hzf, H * 0.95 + vy)
         FX.add_glints(img, gx, gy, gs, gi * 1.05, color=(1.0, 0.88, 0.66))
         # halation source: the luminous sky / sun path BEFORE any silhouette is laid over it; spread and
         # added back after the foreground so the light wraps round every edge near the sun
         hal = self.halation_src(img)
         dfar = pan + Kt / Z_FAR
-        img = F.over_rgba(img, self.sample(self.farp, dfar, 1.0, 1.0))
-        sf = self.sample(self.surf, dfar, 1.0, 1.0)
+        vfar = vy + Ky / Z_FAR
+        img = F.over_rgba(img, self.sample(self.farp, dfar, 1.0, 1.0, dy=vfar))
+        sf = self.sample(self.surf, dfar, 1.0, 1.0, dy=vfar)
         sf[..., 3] *= 0.7 + 0.3 * math.sin(t * 1.3)
         img = F.over_rgba(img, sf)
         # lighthouse lamp: slow rotating-beam flash
-        lx, ly = self.lamp_p[0] - self.ox + dfar, self.lamp_p[1] - self.oy
+        lx, ly = self.lamp_p[0] - self.ox + dfar, self.lamp_p[1] - self.oy + vfar
         ph = (t + 1.1) % 3.2
         flash = 0.25 + 1.2 * math.exp(-((ph - 1.6) / 0.28) ** 2)
         FX.add_glints(img, [lx], [ly], 0.006 + 0.012 * (flash - 0.25), 0.5 * flash, color=(1.0, 0.9, 0.7))
         # a few gulls gliding over the sea, in front of the glow
-        b = FX.birds_local(W, H, t, seed=5, n=4, center=(0.53 + pan * 0.9 / W, 0.3), velocity=(-0.012, -0.0015),
-                           size=0.013, spread=0.045, flap=1.6, heading=-1.0, size_var=0.35)
+        b = FX.birds_local(W, H, t, seed=5, n=4, center=(0.53 + pan * 0.9 / W, 0.3 + vy / H),
+                           velocity=(-0.012, -0.0015), size=0.013, spread=0.045, flap=1.6, heading=-1.0, size_var=0.35)
         if b is not None:
             m, bx0, by0 = b
             sl = img[by0:by0 + m.shape[0], bx0:bx0 + m.shape[1]]
@@ -374,51 +476,59 @@ class Scene:
         ox, oy = self.ox, self.oy
         img = np.ascontiguousarray(img)
         rw = self.rows
-        self.comp(img, d['road'], d['iz_road'], pan, Kt, ox, oy, rw['road'])
-        self.comp(img, d['grass'], d['iz_grass'], pan, Kt, ox, oy, rw['grass'], sway=(d['grass_w'], {}), t=t)
-        self.comp(img, d['rail'], d['iz_rail'], pan, Kt, ox, oy, rw['rail'])
-        self.comp(img, d['hill'], d['iz_hill'], pan, Kt, ox, oy, rw['hill'])
-        self.comp(img, d['poles'], d['iz_poles'], pan, Kt, ox, oy, rw['poles'])
-        WI.draw(img, self.landb.wires, pan, Kt, ox, oy, self.f, self.s)
+        self.comp(img, d['road'], d['iz_road'], pan, Kt, ox, oy, rw['road'], V=V)
+        self.comp(img, d['grass'], d['iz_grass'], pan, Kt, ox, oy, rw['grass'], sway=(d['grass_w'], {}), t=t, V=V)
+        self.comp(img, d['rail'], d['iz_rail'], pan, Kt, ox, oy, rw['rail'], V=V)
+        self.comp(img, d['hill'], d['iz_hill'], pan, Kt, ox, oy, rw['hill'], V=V)
+        # the hillside crown on its own plate: gentle per-clump wind sway (secondary motion)
+        self.comp(img, d['tree'], d['iz_tree'], pan, Kt, ox, oy, rw['tree'],
+                  sway=(d['tree_w'], dict(fn=self.sway_clusters, amp=4.0, freq=0.85)), t=t, V=V)
+        self.comp(img, d['poles'], d['iz_poles'], pan, Kt, ox, oy, rw['poles'], V=V)
+        WI.draw(img, self.landb.wires, pan, Kt, ox, oy, self.f, self.s, D=Dp, c=(W / 2.0, HZ * H), V=V)
         # specular glints travelling along the guardrail top / wires as they line up with the sun
         gl = self.landb.rail_glints + self.landb.wire_glints
         if gl:
             ga = np.array([g[:5] for g in gl], np.float64)
             gx_ = ga[:, 0] - ox + pan + Kt * ga[:, 2]
-            gy_ = ga[:, 1] - oy
+            gy_ = ga[:, 1] - oy + vy + Ky * ga[:, 2]
             al = np.exp(-((gx_ - sx) / (0.1 * W)) ** 2)
             gi = ga[:, 3] * al * (0.45 + 0.12 * np.sin(t * 1.1 + ga[:, 4]))
             FX.add_glints(img, gx_, gy_, 0.007 + 0.006 * al, gi, color=(1.0, 0.86, 0.62))
         # curve-mirror glint
         mg = self.landb.mirror_glint
-        mgx, mgy = mg[0] - ox + pan + Kt * self.landb.mirror_iz, mg[1] - oy
-        FX.add_glints(img, [mgx], [mgy], 0.012, 0.5 + 0.2 * math.sin(t * 2.0), color=(1.0, 0.92, 0.8))
+        miz = self.landb.mirror_iz
+        FX.add_glints(img, [mg[0] - ox + pan + Kt * miz], [mg[1] - oy + vy + Ky * miz], 0.012,
+                      0.5 + 0.2 * math.sin(t * 2.0), color=(1.0, 0.92, 0.8))
         img *= self.fg_dark
         img = np.ascontiguousarray(img)
         # ---- near foreground (strongest parallax)
         nd, nb = self.near, self.nearb
-        self.comp(img, nd['back'], nd['iz_back'], pan, Kt, nb.mx, 0, rw['back'])
+        self.comp(img, nd['back'], nd['iz_back'], pan, Kt, nb.mx, nb.T, rw['back'], V=V)
         dn = pan + Kt / NEAR.Z_GRASS
-        self.comp(img, nd['front'], nd['iz_front'], pan, Kt, nb.mx, 0, rw['front'],
-                  sway=(nd['front_w'], dict(amp=0.007, freq=1.3, seed=1.7)), t=t)
+        self.comp(img, nd['front'], nd['iz_front'], pan, Kt, nb.mx, nb.T, rw['front'],
+                  sway=(nd['front_w'], dict(amp=0.007, freq=1.3, seed=1.7)), t=t, V=V)
         img = np.ascontiguousarray(img)
         # street lamp (already lit at dusk) + glint travelling along the fence top rail
-        dp = pan + Kt / NEAR.Z_POLE
-        lpx, lpy = nb.lamp[0] - nb.mx + dp, nb.lamp[1]
+        izp = 1.0 / NEAR.Z_POLE
+        lpx, lpy = nb.lamp[0] - nb.mx + pan + Kt * izp, nb.lamp[1] - nb.T + vy + Ky * izp
         FX.add_glints(img, [lpx], [lpy], 0.01, 0.35, color=(1.0, 0.85, 0.6))
-        fgx = nb.fence_glint[0] - nb.mx + dp + (0.5 - ease(t / DURATION)) * 0.12 * W
-        FX.add_glints(img, [fgx], [nb.fence_glint[1]], 0.016, 0.55, color=(1.0, 0.88, 0.68))
+        fgx = nb.fence_glint[0] - nb.mx + (0.5 - ease(t / DURATION)) * 0.12 * W + pan + Kt * izp
+        fgy = nb.fence_glint[1] - nb.T + vy + Ky * izp
+        FX.add_glints(img, [fgx], [fgy], 0.016, 0.55, color=(1.0, 0.88, 0.68))
         img += hal
         # drifting motes of light near the lens
-        self.motes(img, t, dn)
+        self.motes(img, t, dn, vy + Ky / NEAR.Z_GRASS)
         img *= self.paper
         FX.fast_bloom(img, threshold=1.05, knee=0.3, strength=0.26, halation=0.12)
         vis = F.sun_visibility(occ, sx, sy, 0.012 * W) if occ is not None else 1.0
-        # ghost chain across the frame toward the lower left; its axis swings with the truck
+        # ghost chain across the frame toward the lower left (the single restrained flare of the shot)
         uu = ease(t / DURATION)
         self.flare.add(img, sx, sy, intensity=0.4 + 0.3 * vis,
                        center=(W * (0.36 - 0.12 * (uu - 0.5)), H * (0.7 + 0.04 * (uu - 0.5))))
         # thin anamorphic streak through the sun (photographic, subtle) - static shape, follows the sun
-        img += self.streak_at(sx, sy) * (0.55 + 0.45 * vis)
+        # (dimmed where it crosses dark foreground silhouettes, so it never reads as a seam across the tree)
+        stk = self.streak_at(sx, sy) * (0.55 + 0.45 * vis)
+        lum_ = img.max(-1, keepdims=True)
+        img += stk * (0.25 + 0.75 * C.smoothstep(0.25, 0.8, lum_))
         img = F.shoulder(img, 0.9, desat=0.04)
         return F.finish_fast(img, t, sat=1.05, grain_amt=0.0, vig=0.22, ca=0.0006)

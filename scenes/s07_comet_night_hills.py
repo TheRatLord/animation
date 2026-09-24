@@ -59,7 +59,7 @@ def clumped_bumps(xs, Wp, th, seed, gap=-0.5, dens=None):
 
 def forest_hills2(Wp, Hl, rows, ss, s, H, light, seed, y_base, tree_h, pal, mist_col, mist_amt=0.3,
                   back_haze=0.45, rim_col=(0.45, 0.7, 0.95), rim_amt=1.0, dens=None, forest_bias=0.0,
-                  spur_px=None, lean=1.0):
+                  spur_px=None, lean=1.0, stamp=False):
     """rows: supersampled top lines (len Wp*ss), back first.
     pal: snow_lit snow_sh snow_gully forest_lit forest_sh forest_base.  Returns straight RGBA."""
     pal = {k: np.asarray(v, np.float32) for k, v in pal.items()}
@@ -140,7 +140,8 @@ def forest_hills2(Wp, Hl, rows, ss, s, H, light, seed, y_base, tree_h, pal, mist
             cl_ = pal['forest_sh'] * 0.4 + pal['forest_lit'] * 0.6
             szf = lambda y: th * 0.8  # noqa: E731
             before = rgba[..., :3].copy()
-            V.stamp_forest(rgba, reg, seed + 131 * i + 7, s, lxw, szf, cd, cl_, spacing=1.15, ss=2)
+            if stamp:
+                V.stamp_forest(rgba, reg, seed + 131 * i + 7, s, lxw, szf, cd, cl_, spacing=1.15, ss=2)
             # the canopy keeps the terrain form: lit spur faces lighter, gullies / low slopes darker,
             # and big soft value patches across each grove (never one flat stamped tone)
             pn = P.fbm_lowres(Wp, Hl, 6, 2, seed + 55 + i, q=8)
@@ -148,6 +149,10 @@ def forest_hills2(Wp, Hl, rows, ss, s, H, light, seed, y_base, tree_h, pal, mist
                 * (0.85 + 0.3 * pn) * (0.8 + 0.3 * near)
             tree = np.clip(np.abs(rgba[..., :3] - before).sum(-1) * 40, 0, 1)
             rgba[..., :3] = rgba[..., :3] * (1 + (shade[..., None] - 1) * np.maximum(tree, fmask)[..., None])
+        # ---- stacked conifer-top bands over the groves (snow-dusted crowns, aerial fade upward)
+        import s07_comet_night_v7 as V7
+        V7.conifer_bands7(rgba[..., :3], fmask, top, depth[None, :] + 0 * ys, ss, s, Wp, th, lxw,
+                          seed + 991 * (i + 1), pal, mist_col, haze=0.22)
         # ---- aerial: back rows paler / bluer
         hz = back_haze * (1 - f)
         rgba[..., :3] = rgba[..., :3] * (1 - hz) + mist_col * hz

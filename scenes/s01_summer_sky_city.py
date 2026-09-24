@@ -86,23 +86,32 @@ def roof_face(cv, pts, y_top, y_bot, pal, cs, hk, seed, sheen_x=None, lit=1.0):
         kc = 1.0 + 0.5 * np.clip((cs - 4.0) / 4.0, 0, 1)       # nearer rows: stronger tile courses
         kn = float(np.clip((cs - 5.5) / 2.5, 0, 1))              # nearest row: full kawara modelling
         c = c * (1 + (0.28 + 0.2 * kn) * kc * lip * lit - (0.2 + 0.22 * kn) * kc * und)[..., None]
-        # tile ribs (vertical), staggered per course, with per-tile jitter
+        # tile ribs: faint vertical joints (painted courses, not a per-tile dot grid)
         tw = cs * 1.15
-        g = (gx / tw + 0.5 * (row % 2) * (1 - kn))
+        g = gx / tw
         rib = np.abs(np.mod(g, 1.0) - 0.5) * 2
-        c = c * (1 - 0.1 * _ss(0.75, 1.0, rib))[..., None]
+        c = c * (1 - (0.035 + 0.03 * kn) * _ss(0.8, 1.0, rib))[..., None]
         if kn > 0:
-            # rounded kawara: each tile column is a barrel (lit crown, shaded troughs), and the glaze on
-            # every barrel crown mirrors the bright sky just below each course lip
-            ph_ = np.mod(g, 1.0)
-            barrel = np.cos((ph_ - 0.4) * 2 * math.pi)
-            c = c * (1 + kn * (0.13 * barrel - 0.08 * _ss(0.8, 0.98, ph_)))[..., None]
-            glaze = _ss(0.55, 0.95, barrel) * _ss(0.05, 0.12, f) * _ss(0.42, 0.2, f)
-            c = c + (hz(_h('#cfe2f6'), hk) - c) * np.clip(kn * glaze * 0.4 * (0.6 + 0.4 * lit), 0, 0.6)[..., None]
-            # a thin dark line where each course overlaps the next (per-row shadow line)
-            c = c * (1 - kn * 0.35 * np.exp(-((f - 0.97) / 0.035) ** 2))[..., None]
-        idx = (np.floor(g).astype(np.int64) * 131 + row * 17) % 4096
-        c = c * (0.95 + 0.1 * jit[idx])[..., None]
+            # course overlap: a crisp dark line under each lip + a soft sky glaze band on the lip itself
+            c = c * (1 - kn * 0.3 * np.exp(-((f - 0.97) / 0.03) ** 2))[..., None]
+            gl_ = _ss(0.02, 0.1, f) * _ss(0.3, 0.12, f) * (1 - v) ** 1.5
+            c = c + (hz(_h('#c6dbf2'), hk) - c) * np.clip(kn * gl_ * 0.22 * lit, 0, 0.4)[..., None]
+        # wear: rain streaks running down from the ridge in a few tile columns, and occasional runs of
+        # replaced (slightly different) tiles along a course
+        colid = np.floor(gx / (tw * 2.6)).astype(np.int64)
+        stre = (jit[(colid * 7919 + seed) % 4096] > 0.8) * (0.4 + 0.6 * jit[(colid * 31 + 5) % 4096])
+        c = c * (1 - 0.07 * stre * _ss(0.15, 0.9, v))[..., None]
+        # rust runs: warm orange-brown streaks bleeding down from ridge fittings / flashing, narrow and
+        # tapering, only on a few columns (weathered, lived-in roofs)
+        rcol = np.floor(gx / (tw * 1.7)).astype(np.int64)
+        rj = jit[(rcol * 4271 + seed * 3) % 4096]
+        rust = (rj > 0.86) * _ss(0.0, 0.25, v) * (1 - _ss(0.4, 1.0, v) * (0.3 + 0.7 * jit[(rcol * 13) % 4096]))
+        rw = np.abs(np.mod(gx / (tw * 1.7), 1.0) - 0.5) * 2
+        rust = rust * _ss(0.55, 0.15, rw) * (1 - hk)
+        c = c + (np.array([0.5, 0.3, 0.2], np.float32) * c.mean(-1, keepdims=True) * 1.2 - c) * (0.45 * rust)[..., None]
+        run = np.floor(gx / (tw * 5.0)).astype(np.int64)
+        idx = (run * 131 + row * 17 + seed) % 4096
+        c = c * (0.975 + 0.05 * jit[idx])[..., None]
         # backlit: the tile courses nearest the ridge catch a specular glaze (each lip a bright line)
         spec = np.exp(-v / 0.12) * (0.35 + 0.65 * lip) * lit
         if sx is not None:
@@ -588,7 +597,7 @@ def town_near(W, H, pw, ph, y_top0, seed=11):
     ox = (pw - W) / 2
     base = y_top0 + H * 1.3
     s = W / 1920
-    rows = [(0.822, 0.13, 0.3, 4.2), (0.87, 0.18, 0.14, 5.6), (0.95, 0.27, 0.0, 9.0)]
+    rows = [(0.822, 0.13, 0.38, 4.2), (0.87, 0.18, 0.17, 5.6), (0.95, 0.27, 0.0, 9.0)]
     import s01_summer_sky_roofdetail as RD
     drng = np.random.default_rng(seed + 100)
     for ri, (fy, fw, hk, cs) in enumerate(rows):
@@ -608,7 +617,8 @@ def town_near(W, H, pw, ph, y_top0, seed=11):
             if ri == 2 and kind == 'gable':
                 kind = 'hip'          # nearest row: hipped roofs show a lit and a shadowed plane
             yr = house(cv, x, ye, w, s, rng, hk, kind, base - ye, cs * s, detail=1.0)
-            RD.roof_clutter(cv, x, w, yr, ye, kind, s, hk, drng, big=1.0 if ri > 0 else 0.7)
+            RD.roof_clutter(cv, x, w, yr, ye, kind, s, hk, drng, big=1.0 if ri > 0 else 0.7,
+                           dens=(1.0, 1.5, 1.9)[ri])
             if ri == 2 and drng.random() < 0.85:
                 ax2 = x + drng.uniform(-0.25, 0.25) * w
                 if not any(abs(ax2 - (ox + sx_ * W)) < hw_ * W for sx_, hw_ in SIGN_BANDS):
@@ -683,7 +693,7 @@ def town_far(W, H, pw, ph, y_top0, seed=5):
     rooftop_sign(cv, bx0 + 0.38 * (bx1 - bx0), by, 0.065 * W, 0.03 * H, s, hk, 'コーポ青空')
     RD.flat_roof_kit(cv, bx0 + 0.52 * (bx1 - bx0), bx0 + 0.62 * (bx1 - bx0), by, s, hk, drng, fh)
     rooftop_sign(cv, ox + 0.905 * W, y_top0 + 0.742 * H, 0.06 * W, 0.026 * H, s, 0.6, 'さくら歯科')
-    rooftop_sign(cv, ox + 0.07 * W, y_top0 + 0.735 * H, 0.095 * W, 0.028 * H, s, 0.62, '田中クリーニング')
+    rooftop_sign(cv, ox + 0.07 * W, y_top0 + 0.735 * H, 0.095 * W, 0.028 * H, s, 0.42, '田中クリーニング')
     sx = bx0 + 0.08 * (bx1 - bx0)
     cv.poly([(sx - 0.025 * W, by), (sx + 0.025 * W, by), (sx + 0.025 * W, by - 0.05 * H), (sx - 0.025 * W, by - 0.05 * H)],
             hz(_h('#9aa2b8'), hk))

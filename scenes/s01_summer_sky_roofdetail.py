@@ -133,14 +133,14 @@ def vent_stack(cv, x, y, h, s, hk):
     cv.lines([[(x - w * 0.6, y - h - w * 0.5), (x + w * 0.6, y - h - w * 0.5)]], max(0.5, 0.5 * s), hz(RIM, hk * 0.4), 0.9)
 
 
-def roof_clutter(cv, x, w, y_r, y_e, kind, s, hk, rng, big=1.0):
+def roof_clutter(cv, x, w, y_r, y_e, kind, s, hk, rng, big=1.0, dens=1.0):
     """Clutter for one house roof that faces the camera (hip / gable faces): pick a few items."""
     if kind == 'gable_end':
-        if rng.random() < 0.5:
+        if rng.random() < 0.5 * dens:
             bs_dish(cv, x + w * 0.22, y_e + (y_e - y_r) * 0.2, w * 0.035 * big, s, hk)
         return
     rh = y_e - y_r
-    items = rng.random(4)
+    items = rng.random(4) / dens
     used = []
     if items[0] < 0.32:
         hw = w * rng.uniform(0.18, 0.24)

@@ -152,10 +152,38 @@ class Far:
         m2, fx0, fy0 = rf
         h2, w2 = m2.shape
         gx2, gy2 = cv.grid(fx0, fy0, w2, h2)
-        strata = _smooth_noise(w2, 9, 1.2)[None] * 0.5 + 0.5
-        lit = C.smoothstep(xs[int(n * 0.92)], cliff_top_x + 0.012 * W, gx2)
-        fc = C.lerp(cc('#8a5a88'), cc('#f0977c'), (lit * (0.75 + 0.25 * strata))[..., None])
-        fc = C.lerp(fc, cc('#b86a84'), (C.smoothstep(wl - 0.012 * H, wl, gy2) * 0.6)[..., None])
+        # painted rock: vertical buttress planes (lit where the rock turns to the sun on the right, one cool
+        # violet shadow value where it turns away), broken horizontal strata, a crisp lit top rim, the base
+        # hazed into the sea glow
+        u_ = W / 1920.0
+        prof_ = _smooth_noise(w2 + 60, 9, 5.0 * u_ + 1.0)[30:30 + w2] * 1.0 + _smooth_noise(w2 + 60, 19, 1.6 * u_ + 0.5)[30:30 + w2] * 0.25
+        slope_ = np.gradient(prof_)
+        face_lit = C.smoothstep(-0.03, 0.03, slope_ / (np.abs(slope_).max() + 1e-6) * 0.3)[None]                    # plane faces the sun
+        lit = C.smoothstep(xs[int(n * 0.9)], cliff_top_x + 0.006 * W, gx2)     # the headland turns toward the sun
+        vy2 = C.smoothstep(top[-1], wl, gy2)
+        # buttresses lean slightly: shear the plane pattern with height
+        sh_ = np.clip((gx2 - fx0 + (gy2 - fy0) * 0.06).astype(np.int32), 0, w2 - 1)
+        fl = face_lit[0][sh_]
+        # strata: broken horizontal bands (value only), slightly tilted
+        sy = (gy2 - fy0) + (gx2 - fx0) * 0.08
+        st = np.sin(sy / (2.6 * u_ + 0.8) + 0.8 * _smooth_noise(w2, 23, 12)[None]) * 0.5 + 0.5
+        strata_d = C.smoothstep(0.82, 0.95, st) * (0.5 + 0.5 * C.smoothstep(0.3, 0.7, _smooth_noise(w2, 29, 5)[None] * 0.5 + 0.5))
+        c_lit, c_lit2 = cc('#f7a07a'), cc('#ffc28e')
+        c_mid, c_shd = cc('#c07484'), cc('#6c548e')
+        L_ = lit * (0.55 + 0.45 * fl) * (1 - 0.25 * vy2)
+        fc = C.lerp(c_shd, c_mid, C.smoothstep(0.15, 0.45, L_)[..., None])
+        fc = C.lerp(fc, c_lit, C.smoothstep(0.45, 0.7, L_)[..., None])
+        fc = C.lerp(fc, c_lit2, (C.smoothstep(0.75, 0.95, L_) * (1 - vy2) * 0.8)[..., None])
+        fc = fc * (1 - 0.18 * strata_d * (0.4 + 0.6 * L_))[..., None]
+        # crisp lit rim along the top edge of the face (the plateau lip catches the sun)
+        mtop = m2 > 0.5
+        first = np.argmax(mtop, axis=0)
+        dtop = (gy2 - fy0) - first[None]
+        rim_ = C.smoothstep(2.2 * u_ + 0.6, 0.6, dtop) * (dtop >= 0) * C.smoothstep(0.2, 0.6, lit)
+        fc = C.lerp(fc, cc('#ffd9a0'), (0.85 * rim_)[..., None])
+        # base haze into the water (sea glow colour), the last ~2.5% of the frame height
+        haze = C.smoothstep(wl - 0.03 * H, wl + 0.002 * H, gy2) * 0.75
+        fc = C.lerp(fc, cc('#d09aa8'), haze[..., None])
         cv.put(rf, fc)
         # -- rim light on the crest (sun from the right, slightly behind): thin gold line on the canopy
         rim_pts = np.stack([xs, canopy], 1)

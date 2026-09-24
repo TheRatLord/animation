@@ -117,6 +117,78 @@ def custom_lobes(rng, X, Yb, Z, Hc, L, hw0=0.27, hw1=0.19, crown=0.26, lean=-0.0
     return rows
 
 
+# ------------------------------------------------------------------------------------------ round 9 massing
+# (x offset, top height, base half-width, top half-width, z offset, lean) in units of Hc. A broad pyramid:
+# the main column plus stepped sub-towers of different heights that spread the base ~1.9x the upper
+# column width; each sub-tower breaks the outline with its own crowned head.
+PYR_TOWERS = (
+    (0.0, 1.0, 0.16, 0.1, 0.0, -0.02),         # main column (crown added separately)
+    (-0.135, 0.62, 0.09, 0.05, -0.1, -0.06),    # left sub-tower (sun side, catches light)
+    (0.125, 0.47, 0.1, 0.06, -0.06, 0.07),      # right sub-tower (shadow side)
+    (0.06, 0.78, 0.07, 0.05, 0.06, 0.05),      # upper right step, behind
+    (-0.18, 0.28, 0.08, 0.05, -0.16, -0.05),    # low left shoulder (near)
+    (0.19, 0.2, 0.07, 0.045, -0.12, 0.06),     # low right shoulder (near)
+    (-0.05, 0.35, 0.1, 0.07, -0.2, 0.0),       # front lower mass (overlaps the column foot)
+)
+
+
+def pyramid_lobes(rng, X, Yb, Z, Hc, L, towers=PYR_TOWERS, recede=0.2, depth=0.85, flat=0.86,
+                  crown=((0.0, 0.92, 0.1), (-0.08, 0.86, 0.065), (0.08, 0.875, 0.06), (-0.04, 0.975, 0.05),
+                         (0.045, 0.96, 0.05), (0.11, 0.8, 0.05)),
+                  big=(0.045,), small=(0.022, 0.011, 0.0055), dens=0.8, clump=0.6, hier=0.85, front=0.95,
+                  split=0.5):
+    """Broad-based cumulonimbus massing (camera space px at depth Z): stepped towers stacked from big
+    flattened heads (the lower the bigger), a domed crown cluster of heads; then two scale families of
+    cauliflower: big bulges on the lower half, fine bubbling florets on the upper half."""
+    cores = []
+    for (xo, th, hb, ht, zo, ln) in towers:
+        s = 0.0
+        k = 0
+        while s < 1.0 and k < 40:
+            hw = (hb + (ht - hb) * s) * Hc
+            r = hw * rng.uniform(0.62, 0.8)
+            yc = Yb - s * th * Hc
+            top = Yb - th * Hc
+            last = yc - r * flat <= top
+            if last:
+                yc = top + r * flat
+            xc = X + (xo + ln * s * th) * Hc
+            zc = Z + zo * Hc + recede * s * th * Hc
+            # one big head per step, staggered left / right (a lumpy heaped column, not a chain of balls)
+            off = (1 if k % 2 else -1) * hw * rng.uniform(0.1, 0.35)
+            rr = r * rng.uniform(1.2, 1.4)
+            cores.append((np.array([xc + off, yc + rng.uniform(-0.1, 0.1) * rr, zc + rng.uniform(-0.2, 0.2) * rr]),
+                          np.array([rr * rng.uniform(1.0, 1.15), rr * flat, rr * depth])))
+            if last:
+                break
+            s += r / (th * Hc) * rng.uniform(1.0, 1.3)
+            k += 1
+    for (xo, sh, rr) in crown:
+        r = rr * Hc
+        y = Yb - sh * Hc + r * flat
+        x = X + (xo + towers[0][5] * sh) * Hc
+        z = Z + recede * sh * Hc - 0.3 * r
+        cores.append((np.array([x, y, z]), np.array([r * 1.1, r * flat, r * depth])))
+    area = math.pi * 0.2 * Hc * Hc * 1.6
+    ymid = Yb - split * Hc
+
+    def lower(P):
+        return 0.15 + 0.85 * _ss(ymid - 0.15 * Hc, ymid + 0.1 * Hc, P[:, 1])
+
+    def upper(P):
+        return 0.25 + 0.75 * (1 - _ss(ymid - 0.05 * Hc, ymid + 0.25 * Hc, P[:, 1]))
+
+    lob = KK.surface_grow(rng, cores, [Hc * f for f in big], dens=dens, area=area, sun=L, flat=flat,
+                          clump=clump, front=front, hier=hier * 0.6, region=lower)
+    lob = KK.surface_grow(rng, lob, [Hc * f for f in small], dens=dens, area=area, sun=L, flat=flat,
+                          clump=clump, front=front, hier=hier, region=upper)
+    rows = []
+    for c, r, rt in lob:
+        rows.append((c[0], c[1], c[2], r[0], r[1], r[2], -1e30, Yb + rng.normal() * 0.004 * Hc,
+                     1.0, 0.0, 0.0, rt, 0.0))
+    return np.asarray(rows, np.float64)
+
+
 def _ss(e0, e1, x):
     t = np.clip((x - e0) / (e1 - e0 + 1e-9), 0, 1)
     return t * t * (3 - 2 * t)
@@ -203,7 +275,7 @@ def paint_s01(R, w, h, base_y, Hc, sun_px, sun_dir, seed=0, **kw):
                   _lerp3(p['lit'], p['hi'], (lw - 0.5) / 0.5))
     # a thin lilac band just on the shadow side of the terminator (separates the lit crescent)
     band = _ss(t - e - p['band_w'], t - e, v2) * (1 - lit)
-    sh = sh + (np.asarray(p['band'], F32) - sh) * (band * 0.6)[..., None]
+    sh = sh + (np.asarray(p['band'], F32) - sh) * (band * p.get("band_k", 0.6))[..., None]
     col = sh * (1 - lit[..., None]) + lc * lit[..., None]
     if p['post_kuwa']:
         col = KK.kuwahara(col, max(1, int(round(p['post_kuwa'] * sc))), q=6.0)
@@ -221,12 +293,52 @@ def paint_s01(R, w, h, base_y, Hc, sun_px, sun_dir, seed=0, **kw):
     if p['base_dark']:
         bd = 1 - _ss(0, p['base_h'] * Hc, base_y - ys)
         col = col * (1 - p['base_dark'] * bd[..., None])
+    if p.get('haze_y') is not None and p.get('haze'):
+        # aerial perspective at the foot: the lowest visible part melts into the horizon haze
+        amt, hh_ = p['haze']
+        hz_ = 1 - _ss(0.0, hh_ * Hc, p['haze_y'] - ys)
+        col = col + (np.asarray(p['haze_col'], F32) - col) * (amt * hz_ ** 1.5)[..., None]
     # silhouette alpha: crisp where lit, lost where shaded
     litm = _ss(0.25, 0.7, S)
     a0 = p['crisp'][0] * litm + p['lost'][0] * (1 - litm)
     a1 = p['crisp'][1] * litm + p['lost'][1] * (1 - litm)
     Ae = np.clip((A - a0) / np.maximum(a1 - a0, 1e-3), 0, 1)
     Ae = Ae * Ae * (3 - 2 * Ae)
+    ins = cv2.distanceTransform((Ae > 0.5).astype(np.uint8), cv2.DIST_L2, 5).astype(F32)
+    shadow = 1 - lit
+    if p.get('core'):
+        # value hierarchy in the shade: a deeper saturated cyan-violet core in the lower middle of the
+        # shadow flank, away from the edges
+        amt, cxo, cys, rad = p['core']
+        ax_ = p.get('axis_x') if p.get('axis_x') is not None else 0.5 * (x0 + x1)
+        g = np.exp(-(((xs - (ax_ + cxo * Hc)) / (rad * Hc)) ** 2 + ((ys - (base_y - cys * Hc)) / (1.5 * rad * Hc)) ** 2))
+        k = amt * g * _ss(0.01 * Hc, 0.07 * Hc, ins) * shadow
+        k = cv2.GaussianBlur(k, (0, 0), 6 * sc + 1)
+        col = col + (np.asarray(p['core_col'], F32) - col) * k[..., None]
+    if p.get('refl'):
+        # reflected sky fill: the lower shadow-side edges turn lighter and cooler toward the silhouette
+        amt, rw = p['refl']
+        Ab_ = cv2.GaussianBlur(Ae, (0, 0), 8.0 * sc + 1)
+        gx_ = cv2.Sobel(Ab_, cv2.CV_32F, 1, 0, ksize=3)
+        gy_ = cv2.Sobel(Ab_, cv2.CV_32F, 0, 1, ksize=3)
+        gl_ = np.sqrt(gx_ * gx_ + gy_ * gy_) + 1e-6
+        fac = np.clip(-gx_ / gl_ * 0.8 + 0.2, 0, 1)
+        fac = cv2.GaussianBlur(fac, (0, 0), 0.02 * Hc)
+        band = 1 - _ss(0.0, rw * Hc, ins)
+        low = _ss(base_y - 0.75 * Hc, base_y - 0.3 * Hc, ys)
+        k = amt * band * low * shadow * np.clip(fac * 1.5, 0, 1)
+        col = col + (np.asarray(p['refl_col'], F32) - col) * k[..., None]
+    if p.get('backlit'):
+        # the crown right in front of the sun: the body drops to a luminous grey-blue (light comes through,
+        # not onto it); the silhouette itself burns (rim below) and a forward-scatter glow floods the edge
+        amt, reach = p['backlit']
+        d_ = np.hypot(xs - sun_px[0], ys - sun_px[1]) / Hc
+        near_ = np.exp(-(d_ / reach) ** 2)
+        lum = col.mean(-1, keepdims=True)
+        bl = _lerp3(p['bl_lo'], p['bl_hi'], np.clip((lum[..., 0] - 0.55) / 0.45, 0, 1))
+        glow = np.exp(-(ins / (0.018 * Hc))) * np.exp(-(d_ / (reach * 0.8)) ** 2)
+        col = col * (1 - amt * near_[..., None]) + bl * (amt * near_[..., None])
+        col = col + np.asarray(p['bl_glow'], F32) * glow[..., None]
     # rim: hot lining on the sun-facing silhouette, strongest near the sun
     if p['rim']:
         Ab = cv2.GaussianBlur(Ae, (0, 0), 4.0 * sc + 1)
@@ -243,7 +355,7 @@ def paint_s01(R, w, h, base_y, Hc, sun_px, sun_dir, seed=0, **kw):
         er = cv2.erode(Ae, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * int(rb) + 1, 2 * int(rb) + 1)))
         edge = np.clip(Ae - er, 0, 1)
         edge = cv2.GaussianBlur(edge, (0, 0), 0.6 * sc + 0.3)
-        k = edge * np.clip(near * (0.35 + 0.65 * np.clip(-ny, 0, 1)) + 0.35 * face ** 2 * np.exp(-d / 0.6), 0, 1)
+        k = edge * np.clip(near * (0.35 + 0.65 * np.clip(-ny, 0, 1)) + p.get("rim_face", 0.35) * face ** 2 * np.exp(-d / 0.6), 0, 1)
         col = col + (np.asarray(p['rim_col'], F32) - col) * np.clip(k * p['rim'], 0, 1)[..., None]
     out = np.zeros((h, w, 4), F32)
     out[y0:y1, x0:x1, :3] = col
@@ -257,6 +369,10 @@ def build_lobes(rng, cx, base_y, Hc, eye, dist, w, L, detail=1.0, main=None, cus
     X = cx - w / 2.0
     Yb = base_y - eye
     rows = []
+    if custom is not None and custom.get('pyramid'):
+        c_ = dict(custom)
+        c_.pop('pyramid')
+        return pyramid_lobes(rng, X, Yb, dist, Hc, L, **c_)
     if custom is not None:
         return custom_lobes(rng, X, Yb, dist, Hc, L, **custom)
     wd = 0.5 * Hc
@@ -275,14 +391,17 @@ def build_lobes(rng, cx, base_y, Hc, eye, dist, w, L, detail=1.0, main=None, cus
     return np.concatenate(rows, 0)
 
 
-HERO = dict(custom=dict(hw0=0.19, hw1=0.08, taper=1.0, side_r=(0.25, 0.6), crown=0.1, lean=0.03,
-                        anvil=dict(left=0.08, right=0.22, thick=0.07, neck=3.0, col_hw=0.07, top=1.0),
-                        turrets=((0.16, 0.3, 0.075, -0.1), (-0.15, 0.2, 0.065, -0.12))),
-            seed=5, render=dict(form=0.8, form_blur=8.0), sun_dir=(-0.9, -0.45), sun_z=0.3,
-            paint=dict(term=0.42, detail=1.4, sep=1.2, islands=0.02, side_gate=(-0.35, -0.05), crisp=(0.35, 0.5), rim_px=4.0, rim_col=(1.5, 1.4, 1.2), rim_reach=0.35,
-                       deep=(0.3, 0.44, 0.76), shade=(0.46, 0.59, 0.87), turn=(0.7, 0.78, 0.93),
-                       lit=(0.97, 0.965, 0.94), hi=(1.02, 0.995, 0.94)),
-            florets=dict(density=2.0, r=(1.5, 7.0)), sun_at=(0.03, 0.0))
+HERO = dict(custom=dict(pyramid=True), seed=5, max_dim=420, render=dict(form=0.9, form_blur=16.0),
+            sun_dir=(-0.85, -0.5), sun_z=0.15,
+            paint=dict(term=0.42, detail=0.3, sep=0.15, islands=0.03, band_k=0.3, warp=0.03, side_gate=(-0.35, -0.05), crisp=(0.35, 0.5),
+                       rim_px=5.0, rim_col=(1.6, 1.5, 1.25), rim_reach=0.16,
+                       deep=(0.3, 0.44, 0.8), shade=(0.46, 0.59, 0.88), turn=(0.7, 0.78, 0.94),
+                       lit=(0.965, 0.965, 0.955), hi=(1.0, 0.99, 0.965),
+                       core=(0.75, 0.1, 0.3, 0.2), core_col=(0.22, 0.33, 0.74),
+                       refl=(0.6, 0.05), refl_col=(0.68, 0.8, 0.96),
+                       backlit=(0.7, 0.15), bl_lo=(0.5, 0.58, 0.8), bl_hi=(0.72, 0.78, 0.92),
+                       bl_glow=(0.25, 0.22, 0.15), rim_face=0.08, pre_kuwa=7),
+            florets=dict(density=1.0, r=(1.5, 8.0)), sun_at=('crown', -0.03, 0.012))
 
 
 def hero(pw, ph, cx, base_y, Hc, W, hz_y, **kw):
@@ -319,16 +438,26 @@ def tower(pw, ph, cx, base_y, Hc, W, hz_y, seed=41, sun_z=0.15, max_dim=300, sun
     rows_ = np.nonzero(Ab.any(1))[0]
     ytop = rows_[0] + y0
     sa = sun_at or (0.06, 0.02)
-    ys_ = int(ytop + sa[0] * Hc)
-    cols_ = np.nonzero(Ab[ys_ - y0])[0]
-    sun = np.array([cols_[0] + x0 + sa[1] * Hc, ys_], np.float32)
+    if sa[0] == 'crown':
+        # the sun sits right on the crown's top edge (partly occluded by the top lobes): column at
+        # crown-axis + sa[1] Hc, just below that column's silhouette top by sa[2] Hc
+        top_cols = np.nonzero(Ab[rows_[0]])[0]
+        xa = int(np.mean(top_cols) + sa[1] * Hc)
+        col_ = np.nonzero(Ab[:, xa])[0]
+        sun = np.array([xa + x0, col_[0] + y0 + sa[2] * Hc], np.float32)
+    else:
+        ys_ = int(ytop + sa[0] * Hc)
+        cols_ = np.nonzero(Ab[ys_ - y0])[0]
+        sun = np.array([cols_[0] + x0 + sa[1] * Hc, ys_], np.float32)
     if paint is not None and paint.get('legacy'):
         pk = dict(k_sun=0.55, ramp='s01', seed=seed, base_y=base_y, base_dark=0.1, base_h=0.1)
         pk.update(paint)
         pk.pop('legacy')
         P = K3.paint_vol(R, pw, ph, **pk)
     else:
-        P = paint_s01(R, pw, ph, base_y, Hc, sun, sun_dir, seed=seed, **(paint or {}))
+        pk_ = dict(axis_x=cx, haze_y=hz_y, haze=(0.55, 0.22), haze_col=(0.8, 0.88, 0.97))
+        pk_.update(paint or {})
+        P = paint_s01(R, pw, ph, base_y, Hc, sun, sun_dir, seed=seed, **pk_)
     fk = dict(sun_dir=sun_dir, seed=seed)
     fk.update(florets or {})
     K3.edge_florets(P, **fk)

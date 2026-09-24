@@ -309,6 +309,124 @@ def _paint_tree(canvas, clumps, rng, L2, haze, cyc, ry, ss=2):
     sub[..., 3:4] = np.maximum(sub[..., 3:4], a)
 
 
+_CF_STOPS = np.array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0], np.float32)
+_CF_COLS = np.array([[0.025, 0.085, 0.115],     # deep cool core
+                     [0.055, 0.19, 0.21],       # blue-green shadow mass
+                     [0.13, 0.35, 0.22],        # mid green
+                     [0.36, 0.6, 0.18],         # sunlit leaf green
+                     [0.68, 0.84, 0.26],        # warm yellow-green (backlit, translucent)
+                     [0.93, 0.98, 0.6]], np.float32)   # hot rim
+
+
+def _leaf_cluster(lab, cx, cy, R, k, rng, tips=(5, 9)):
+    """Fill an irregular leaf-cluster shape (pointed leaf tips with notches between them, slightly
+    drooping, randomly rotated) into the label image with value k."""
+    if R < 2.0:
+        cv2.circle(lab, (int(cx), int(cy)), max(1, int(R)), int(k), -1)
+        return
+    m = int(rng.integers(tips[0], tips[1]))
+    a0 = rng.uniform(0, 2 * math.pi)
+    ang = a0 + (np.arange(2 * m) + rng.uniform(-0.3, 0.3, 2 * m)) * (math.pi / m)
+    rr = np.where(np.arange(2 * m) % 2 == 0, rng.uniform(0.92, 1.15, 2 * m), rng.uniform(0.64, 0.82, 2 * m)) * R
+    xs = cx + np.cos(ang) * rr
+    ys = cy + np.sin(ang) * rr * 0.86 + np.maximum(np.sin(ang), 0) * rr * 0.12
+    pts = np.stack([xs * 8, ys * 8], 1).astype(np.int32)
+    cv2.fillPoly(lab, [pts], int(k), shift=3)
+
+
+def _paint_crown(canvas, clumps, rng, L2, haze, cyc, ry, ss=2):
+    """Cauliflower crown (Shinkai foliage). Every clump is built from leaf-cluster discs (big inside,
+    small at the rim) painted back-to-front into a label image, so silhouettes and the tone terminators
+    are hard scalloped arcs. Each disc is shaded as its own little dome (lit cap toward the sun, cool
+    underside) on top of the clump's big form and the crown's vertical falloff, then posterised into
+    flat painted tones. A crisp rim of the hottest tone runs along the sun-side silhouette; a few sky
+    holes are punched through."""
+    h, w = canvas.shape[:2]
+    pad = 8
+    x0 = int(min(c[0] - c[2] * 1.2 for c in clumps)) - pad
+    x1 = int(max(c[0] + c[2] * 1.2 for c in clumps)) + pad
+    y0 = int(min(c[1] - c[2] * 1.2 for c in clumps)) - pad
+    y1 = int(max(c[1] + c[2] * 1.2 for c in clumps)) + pad
+    x0c, y0c, x1c, y1c = max(x0, 0), max(y0, 0), min(x1, w), min(y1, h)
+    if x1c <= x0c or y1c <= y0c:
+        return
+    PW, PH = (x1 - x0) * ss, (y1 - y0) * ss
+    lab = np.full((PH, PW), -1, np.int32)
+    Lx, Ly = float(L2[0]), float(L2[1])
+    DX, DY, DR, DB = [], [], [], []
+    for (cx, cy, rc, tb) in clumps:
+        n = int(np.clip(60 + rc * 0.9, 70, 220))
+        a = rng.uniform(0, 2 * math.pi, n)
+        rr = np.sqrt(rng.uniform(0, 1, n)) * 0.86
+        # irregular clump outline
+        hk = rng.uniform(0, 2 * math.pi, 3)
+        edge = 1.0 + 0.12 * np.sin(2 * a + hk[0]) + 0.08 * np.sin(3 * a + hk[1]) + 0.05 * np.sin(5 * a + hk[2])
+        dx = np.cos(a) * rr * edge
+        dy = np.sin(a) * rr * edge * 0.82
+        rad = rc * (0.06 + 0.13 * (1 - rr) ** 1.2) * rng.uniform(0.75, 1.25, n)
+        px, py = cx + dx * rc, cy + dy * rc
+        zz = np.sqrt(np.clip(1 - dx * dx - dy * dy, 0, 1))
+        big = ((dx * Lx + dy * Ly) * 0.7 + zz * 0.2 - 0.6 * np.clip((py - cyc) / ry, -1, 1) + tb - 0.34
+               + rng.normal(0, 0.03, n))
+        # paint order: lower / shadow-side discs first, upper sunlit ones on top
+        o = np.argsort((py - cy) / rc * -1.0 + (dx * Lx + dy * Ly) * 0.3 + rng.normal(0, 0.2, n))
+        for i in o:
+            k = len(DX)
+            DX.append(px[i]); DY.append(py[i]); DR.append(rad[i]); DB.append(big[i])
+            _leaf_cluster(lab, (px[i] - x0) * ss, (py[i] - y0) * ss, rad[i] * ss, k, rng)
+        # a few tiny leafy scallops on the sun side of the rim (fine cauliflower edge, stays attached)
+        m = int(rng.integers(10, 22))
+        a = rng.normal(math.atan2(Ly, Lx), 0.9, m)
+        rr = rng.uniform(0.74, 0.86, m)
+        px2, py2 = cx + np.cos(a) * rr * rc, cy + np.sin(a) * rr * rc * 0.82
+        for i in range(m):
+            k = len(DX)
+            DX.append(px2[i]); DY.append(py2[i]); DR.append(rc * rng.uniform(0.045, 0.07))
+            DB.append(0.4 - 0.6 * float(np.clip((py2[i] - cyc) / ry, -1, 1)) + tb)
+            _leaf_cluster(lab, (px2[i] - x0) * ss, (py2[i] - y0) * ss, DR[-1] * ss, k, rng, tips=(4, 7))
+        # sky holes inside the outer half of the clump
+        for k in range(int(rng.integers(2, 7))):
+            a_ = rng.uniform(0, 2 * math.pi)
+            r_ = rc * rng.uniform(0.45, 0.8)
+            hr = rc * rng.uniform(0.03, 0.08)
+            c = (int((cx + math.cos(a_) * r_ - x0) * ss), int((cy + math.sin(a_) * r_ * 0.8 - y0) * ss))
+            cv2.ellipse(lab, c, (max(1, int(hr * ss)), max(1, int(hr * ss * rng.uniform(0.5, 0.9)))),
+                        rng.uniform(0, 180), 0, 360, -1, -1)
+    DX, DY, DR, DB = (np.array(v, np.float32) for v in (DX, DY, DR, DB))
+    msk = lab >= 0
+    li = np.where(msk, lab, 0)
+    gx = (np.arange(PW, dtype=np.float32) / ss + x0)[None, :]
+    gy = (np.arange(PH, dtype=np.float32) / ss + y0)[:, None]
+    ux = (gx - DX[li]) / DR[li]
+    uy = (gy - DY[li]) / DR[li]
+    uz = np.sqrt(np.clip(1 - ux * ux - uy * uy, 0, 1))
+    small = (ux * Lx + uy * Ly) * 0.11 + uz * 0.03
+    sh = DB[li] + small
+    # posterise into flat tones with a hair of anti-aliasing at the terminators
+    lev = (0.08 + 0.2 * C.smoothstep(-0.52, -0.46, sh) + 0.2 * C.smoothstep(-0.12, -0.06, sh)
+           + 0.2 * C.smoothstep(0.24, 0.3, sh) + 0.18 * C.smoothstep(0.58, 0.64, sh))
+    # crisp hot rim on the sun-side silhouette (2 plate px)
+    sft = int(max(2, 2 * ss))
+    M = np.float32([[1, 0, -Lx * sft], [0, 1, -Ly * sft]])
+    beyond = cv2.warpAffine(msk.astype(np.uint8), M, (PW, PH), flags=cv2.INTER_NEAREST, borderValue=0)
+    rim = msk & (beyond == 0) & (sh > -0.25)
+    lev = np.where(rim, np.maximum(lev, 0.97), lev)
+    lev = np.where(msk, lev, 0.0).astype(np.float32)
+    mf = cv2.resize(msk.astype(np.float32), (x1 - x0, y1 - y0), interpolation=cv2.INTER_AREA)
+    tf = cv2.resize(lev, (x1 - x0, y1 - y0), interpolation=cv2.INTER_AREA) / np.maximum(mf, 1e-3)
+    col = np.stack([np.interp(np.clip(tf, 0, 1), _CF_STOPS, _CF_COLS[:, c]) for c in range(3)], -1)
+    col = col.astype(np.float32)
+    if haze > 0:
+        col = C.lerp(col, np.array([0.55, 0.72, 0.82], np.float32), haze * (0.6 + 0.4 * (1 - tf))[..., None])
+    sl = (slice(y0c - y0, y1c - y0), slice(x0c - x0, x1c - x0))
+    sub = canvas[y0c:y1c, x0c:x1c]
+    a = mf[sl][..., None]
+    shd = C.blur(mf, 6.0)[sl][..., None]
+    sub[..., :3] *= 1 - 0.35 * shd * (1 - a)
+    sub[..., :3] = sub[..., :3] * (1 - a) + col[sl] * a
+    sub[..., 3:4] = np.maximum(sub[..., 3:4], a)
+
+
 def tree_plate(ppm, sun_dir_screen=(0.25, -1.0), seed=9):
     """RGBA plate of backlit tree crowns (+ trunks/branches) on the plane z = TREE_Z."""
     pw, ph = int((TX1 - TX0) * ppm), int((TY1 - TY0) * ppm)
@@ -327,6 +445,25 @@ def tree_plate(ppm, sun_dir_screen=(0.25, -1.0), seed=9):
         rx = rng.uniform(2.6, 4.2)
         trees.append((x, top, rx))
         x += rx * rng.uniform(1.1, 1.6)
+    # distant tree line: small, hazy blue-green crowns low behind everything (aerial perspective)
+    frng = np.random.default_rng(seed + 100)
+    x = TX0 + 0.5
+    while x < TX1 - 0.5:
+        rxf = frng.uniform(0.9, 1.8)
+        topf = frng.uniform(1.0, 2.1)
+        ryf = rxf * frng.uniform(0.7, 0.95)
+        clumps = []
+        for i in range(int(6 + rxf * 3)):
+            ang = frng.uniform(0, 2 * math.pi)
+            r = math.sqrt(frng.uniform(0, 1))
+            ccx = x + math.cos(ang) * r * rxf * 0.8
+            ccy = topf - ryf + math.sin(ang) * r * ryf * 0.75
+            rc = rxf * frng.uniform(0.28, 0.42)
+            px_, py_ = P(ccx, ccy)
+            clumps.append((px_, py_, rc * ppm, frng.uniform(-0.1, 0.15)))
+        clumps.sort(key=lambda c: -c[1])
+        _paint_crown(canvas, clumps, frng, L2, 0.62, P(0, topf - ryf)[1], ryf * ppm)
+        x += rxf * frng.uniform(0.9, 1.4)
     # far trees first
     order = sorted(range(len(trees)), key=lambda i: trees[i][1] < 1.8)
     ground = -6.0
@@ -340,16 +477,24 @@ def tree_plate(ppm, sun_dir_screen=(0.25, -1.0), seed=9):
         wpx = max(2, int(0.24 * ppm))
         m = np.zeros((ph, pw), np.uint8)
         cv2.line(m, (int(bx), int(by)), (int(cxp), int(cyp + 0.2 * ry * ppm)), 255, wpx, cv2.LINE_AA)
-        for b in range(9):
-            ang = rng.uniform(-2.2, -0.9)
-            ln = rng.uniform(0.3, 0.5) * rx * ppm
+        for b in range(14):
+            ang = rng.uniform(-2.4, -0.7)
+            ln = rng.uniform(0.35, 0.75) * rx * ppm
             sx, sy = cxp + rng.uniform(-0.2, 0.2) * rx * ppm, cyp + rng.uniform(0.0, 0.5) * ry * ppm
             ex, ey = sx + math.cos(ang) * ln, sy + math.sin(ang) * ln
+            # keep the branch inside the crown (it only shows through the gaps)
+            q = math.hypot((ex - cxp) / (0.62 * rx * ppm), (ey - cyp) / (0.6 * ry * ppm))
+            if q > 1.0:
+                ex, ey = cxp + (ex - cxp) / q, cyp + (ey - cyp) / q
             cv2.line(m, (int(sx), int(sy)), (int(ex), int(ey)), 255, max(1, wpx // 3), cv2.LINE_AA)
             for tw_ in range(2):
                 a2 = ang + rng.uniform(-0.8, 0.8)
-                l2 = ln * rng.uniform(0.25, 0.45)
-                cv2.line(m, (int(ex), int(ey)), (int(ex + math.cos(a2) * l2), int(ey + math.sin(a2) * l2)), 255,
+                l2 = ln * rng.uniform(0.12, 0.25)
+                tx_, ty_ = ex + math.cos(a2) * l2, ey + math.sin(a2) * l2
+                q = math.hypot((tx_ - cxp) / (0.66 * rx * ppm), (ty_ - cyp) / (0.64 * ry * ppm))
+                if q > 1.0:
+                    tx_, ty_ = cxp + (tx_ - cxp) / q, cyp + (ty_ - cyp) / q
+                cv2.line(m, (int(ex), int(ey)), (int(tx_), int(ty_)), 255,
                          max(1, wpx // 6), cv2.LINE_AA)
         a = m.astype(np.float32) / 255
         canvas[..., :3] = canvas[..., :3] * (1 - a[..., None]) + trunk * a[..., None]
@@ -370,7 +515,7 @@ def tree_plate(ppm, sun_dir_screen=(0.25, -1.0), seed=9):
         for depth, ccx, ccy, rc in cl:
             px, py = P(ccx, ccy)
             clumps.append((px, py, rc * ppm, depth * 0.3 - 0.15))
-        _paint_tree(canvas, clumps, rng, L2, thz, P(0, cyc)[1], ry * ppm)
+        _paint_crown(canvas, clumps, rng, L2, thz, P(0, cyc)[1], ry * ppm)
     # the lower part fades into dense dark foliage (the trees continue to the ground)
     ys = np.arange(ph, dtype=np.float32)
     yw = TY1 - ys / ppm
