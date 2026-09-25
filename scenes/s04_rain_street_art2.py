@@ -422,11 +422,11 @@ def bookshelves(As, Es, rng, gx0, gy0, gx1, gy1, P):
             else:
                 run_n = 0
                 bw = P(rng.uniform(0.022, 0.05))
-                bh = shelf_h * rng.uniform(0.6, 0.95)
+                bh = shelf_h * (rng.uniform(0.45, 0.95) if rng.random() < 0.8 else rng.uniform(0.3, 0.5))
                 col = hexc(rng.choice(theme)) * rng.uniform(0.75, 1.05)
             tilt = 0.0
-            if rng.random() < 0.08:
-                tilt = rng.uniform(0.15, 0.4) * (1 if rng.random() < 0.5 else -1)
+            if rng.random() < 0.16:
+                tilt = rng.uniform(0.12, 0.45) * (1 if rng.random() < 0.5 else -1)
             dx = bh * tilt
             ox, oy = int(max(min(x, x + dx) - 2, 0)), int(max(base - bh - 2, 0))
             ex_, ey_ = int(min(max(x + bw, x + bw + dx) + 3, ww)), int(min(base + 2, hh))
@@ -455,6 +455,28 @@ def bookshelves(As, Es, rng, gx0, gy0, gx1, gy1, P):
             x += bw + (dx if tilt > 0 else 0) + P(rng.uniform(0.0, 0.008))
             if tilt != 0:
                 x += P(0.02)
+        # lying stacks (books piled flat) and hand-written POP cards standing on the shelf edge
+        for _ in range(int(rng.integers(1, 3))):
+            sx = rng.uniform(gx0, gx1 - P(0.3))
+            yb = base
+            for q in range(int(rng.integers(2, 6))):
+                th = P(rng.uniform(0.025, 0.045))
+                wl = P(rng.uniform(0.18, 0.26))
+                ox = P(rng.uniform(-0.02, 0.02))
+                rect(inter, sx + ox, yb - th, sx + ox + wl, yb, hexc(rng.choice(book_cols)) * light[
+                    int(min(max(yb - 1, 0), hh - 1)), int(min(max(sx, 0), ww - 1))] * 0.8)
+                rect(inter, sx + ox, yb - th, sx + ox + wl, yb - th + max(1.0, th * 0.2), hexc('#f4ecd8') * 0.7)
+                yb -= th
+        for _ in range(int(rng.integers(1, 4))):
+            cx_ = rng.uniform(gx0, gx1 - P(0.15))
+            cw_, ch_ = P(rng.uniform(0.09, 0.16)), P(rng.uniform(0.1, 0.16))
+            cc = hexc(rng.choice(['#fff27a', '#ffffff', '#ffb0b8', '#b8f0ff']))
+            y1_ = base + P(0.02)
+            rect(inter, cx_, y1_ - ch_, cx_ + cw_, y1_, cc * 1.2)
+            for q in range(3):
+                yq = y1_ - ch_ * (0.8 - 0.25 * q)
+                rect(inter, cx_ + cw_ * 0.15, yq, cx_ + cw_ * (0.85 - 0.2 * (q % 2)), yq + max(1.0, ch_ * 0.07),
+                     hexc(rng.choice(['#e01020', '#202020', '#1a50c0'])))
         # shelf board
         rect(inter, gx0, base, gx1, base + P(0.035), hexc('#f2e2c4') * 0.9)
         rect(inter, gx0, base + P(0.035), gx1, base + P(0.045), hexc('#503828') * 0.6)
@@ -463,7 +485,7 @@ def bookshelves(As, Es, rng, gx0, gy0, gx1, gy1, P):
     fall = np.clip(1 - ((ys - gy0) / max(gy1 - gy0, 1)) ** 2 * 0.45, 0.4, 1)
     inter *= fall[..., None]
     # a customer browsing, back-lit by the shelves (only on the wide, near shop windows)
-    if gx1 - gx0 > P(3.0) and P(0.03) > 3:
+    if False:     # (removed: read as a flat cut-out)
         m = np.zeros((hh, ww), np.float32)
         px = gx0 + (gx1 - gx0) * rng.uniform(0.35, 0.6)
         base = gy1 - P(0.02)
@@ -480,8 +502,8 @@ def bookshelves(As, Es, rng, gx0, gy0, gx1, gy1, P):
     refl = np.zeros((hh, ww, 3), np.float32)
     for k in range(int(rng.integers(3, 6))):
         cx = rng.uniform(gx0, gx1)
-        c = hexc(rng.choice(['#ff4fa8', '#40e8ff', '#ffb13d', '#8a7aff']))
-        refl += c * (0.18 * np.exp(-((xs - cx) / P(rng.uniform(0.05, 0.2))) ** 2))[..., None] * \
+        c = hexc(rng.choice(['#ff4fa8', '#40e8ff', '#ffb13d', '#9ad8d0']))
+        refl += c * (0.26 * np.exp(-((xs - cx) / P(rng.uniform(0.05, 0.2))) ** 2))[..., None] * \
             (0.4 + 0.6 * np.clip((ys - gy0) / max(gy1 - gy0, 1), 0, 1))[..., None]
     d = (xs - gx0) / max(gx1 - gx0, 1) + (ys - gy0) / max(gy1 - gy0, 1) * 0.35
     refl += hexc('#dfe8ff') * (0.07 * np.exp(-((d - 0.35) / 0.05) ** 2) +

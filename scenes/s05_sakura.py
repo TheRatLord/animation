@@ -142,6 +142,19 @@ Town wear pass (s05_sakura_town23: rain streaks, stains, plinths, eave soot, war
 slab undersides, stronger aerial fade) + canal wall warm/cool split; railing repainted as grey-blue steel with a
 warm top-edge specular, cool underside and distance falloff (s05_sakura_rail23); the cumulus bank's shade tail
 now fades into the horizon haze (no violet ridge above the roofs).
+Round 24 (reviewer FAIL: milky sun, flat bubble-gum canopy + stipple, hairy twigs, mushy canal): every cherry card
+(near, far, hero branch) gets s05_sakura_r24.regrade_card - per-clump / per-mass value from the sun direction
+(pale lit tips top-left, pink mid body, ~30% violet-grey shade clusters underneath + deeper core, band borders
+broken at flower scale, white stipple compressed), thin twigs buried inside the blossom, terminal twigs past the
+silhouette cut to short stubs, floating wood fragments removed; sun = R24.Sun24 (hot clipped core, thin tapered
+6-point star, tight halo; old starburst / rainbow ring off, sky glow tightened so the sky stays cyan); canal =
+R24.water24 (clean broken horizontal reflection strokes over dark teal, few sun-path sparkles, glints -70%).
+Round 25 (reviewer FAIL: toothpaste ribbons, flat bubble-gum mid band, stamp-pattern shade, twig spikes, flat
+mid-distance smear): both cherry rows by s05_sakura_r25 - blossom regrouped into separate, uneven, lobed clumps
+hanging off the limbs with sky between them (Tree25); value painted PER CLUMP from the sun (lit top-left near white
+-> pale greyish sakura pink -> violet-grey underside, rose accents in small pockets) and laid in through a mosaic of
+round dabs of varied size; shade interiors closed into soft lost-edge masses with varied soft florets (no identical
+stamps); terminal twigs past the silhouette cut to ~1.5 px stubs, visible limbs taper out to a point (regrade25).
 """
 import math
 import os
@@ -199,6 +212,9 @@ import s05_sakura_r22 as R22  # noqa: E402
 import s05_sakura_r23 as R23  # noqa: E402
 import s05_sakura_town23 as TW23  # noqa: E402
 import s05_sakura_rail23 as RL23  # noqa: E402
+import s05_sakura_r24 as R24  # noqa: E402
+import s05_sakura_r25 as R25  # noqa: E402
+import s05_sakura_r26 as R26  # noqa: E402
 
 DURATION = 5.0
 TRAVEL = 2.0          # metres of lateral camera travel over the shot (round 2: ~40% slower)
@@ -302,6 +318,11 @@ class Scene:
                              (0.86, 0.011, (0.66, 0.8, 1.0), 0, 0.035, False),
                              (1.45, 0.017, (1.0, 0.7, 0.85), 0, 0.03, False)]
         self.flare.g1, self.flare.g2 = 0.75, 0.2      # round 21: sun glow kept local (no milky veil)
+        self.flare.no_star = True                     # round 24: sun drawn by R24.Sun24 (core + 6-point star)
+        # round 26: one clean 6-point star (vertical axis, no horizontal streak), lower-left ray kept short so it
+        # does not cross the near bokeh branch; the flare's anamorphic streak is off
+        self.sun24 = R24.Sun24(W, H, base_deg=30.0, lens=[0.62, 0.3, 0.32, 0.58, 0.95, 0.72], lmax=380.0)
+        self.flare.no_streak = True
         self.paper = self._paper()
         self._sky_rows = int(0.64 * H)
         yy = np.arange(H, dtype=np.float32)[:, None, None]
@@ -344,7 +365,7 @@ class Scene:
         self._ws_in = np.concatenate([rng.uniform(0.9, 1.6, n1), rng.uniform(0.35, 0.7, len(i2))])
         # round 8: coherent glitter band under the sun (ripple dashes + warm sheen) replaces the random crosses
         self.glit = GL.Glitter(W, H, self.w_x, self.w_y, self.w_Z, self.w_a, self.emx, self.sun_xy[0], self.cam.hy)
-        self.glit.inten = self.glit.inten * 1.7            # round 9: brighter glitter band under the sun
+        self.glit.inten = self.glit.inten * 0.8            # round 9: brighter glitter band under the sun
         sh = self.glit.sheen(self.water_a, None)
         self._sheen = np.ascontiguousarray(sh[:, self.emx:self.emx + W]).astype(np.float32)
         sc_ = int(np.clip(self.sun_xy[0] + self.emx, 0, self.far_invz.shape[1] - 1))
@@ -613,7 +634,7 @@ class Scene:
         img = np.broadcast_to(col[:, None, :], (h, w, 3)).copy()
         yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
         d2 = ((xx - sun[0]) ** 2 + (yy - sun[1]) ** 2) / (W * W)
-        g = (0.32 * np.exp(-d2 / 0.0035) + 0.025 * np.exp(-d2 / 0.03))[..., None]   # round 21: glow local      # round 19: tighter halation, bluer sky round the sun
+        g = (0.2 * np.exp(-d2 / 0.0011) + 0.018 * np.exp(-d2 / 0.012))[..., None]   # round 24: tight, cyan sky kept   # round 21: glow local      # round 19: tighter halation, bluer sky round the sun
         img = img + (np.array([1.0, 0.97, 0.9], np.float32) - img) * np.clip(g, 0, 1)
         # a gentle lateral lift toward the sun side (the sky is brighter under the sun)
         lat = (1.0 - xx / w)[..., None] ** 1.5 * 0.015
@@ -908,10 +929,14 @@ class Scene:
             wpx = W / 1920.0                      # 1080p pixel in output px
             # round 16: branch skeleton carrying blossom clusters (s05_sakura_r16); cluster size kept >= a few
             # screen px with distance
-            tree = R23.Tree23(tr_rng, scale=1.15 * sc, lean=-1.0, spread=1.2, big=Z < 45, hmul=1.3,
+            # round 25: blossom regrouped into separate hanging clumps with sky between them, value painted per
+            # clump (s05_sakura_r25)
+            tree = R26.Tree26(tr_rng, scale=1.15 * sc, lean=-1.0, spread=1.2, big=Z < 45, hmul=1.3,
                               cl=max(1.0, Z / 14.0) ** 0.7, maxd=4 if Z < 40 else 3)
-            pnt = R23.Painter23(k, sun_dir=(ldx / ln, ldy / ln), px=ss * wpx, detail=1.0 if Z < 60 else 0.6)
+            pnt = R26.Painter26(k, sun_dir=(ldx / ln, ldy / ln), px=ss * wpx, detail=1.0 if Z < 60 else 0.6)
             card, ox, oy = pnt.paint(tree, tr_rng)
+            card = R26.regrade26(card, (ldx / ln, ldy / ln), ss * wpx, clump_px=(k * tree.rc_med) if tree.rc_med else None,
+                                 clumps=R26.clumps_px(tree, k, ox, oy))
             hz = 0.72 * (1.0 - math.exp(-Z / 200.0))
             T2.haze_card(card, hz, hcol_n)
             rgba, x0, y0 = T2.card_to_screen(card, ox, oy, float(bx), float(by), ss)
@@ -925,6 +950,8 @@ class Scene:
         self.hero, self.hero_ox, self.hero_oy = BR.render(W, H, self.sun_xy, top=0.1 + CRANE + 0.02, defocus=0.0019)
         a = self.hero[..., 3:4]
         self.hero_pm = np.concatenate([self.hero[..., :3] * a, a], -1).astype(np.float32)
+        # round 24: the defocused near branch gets the same lit / shade split as the crowns
+        self.hero_pm = R24.regrade_card(self.hero_pm, (0.1, -1.0), 2.5, trim=False, shade_q=0.3, lit_q=0.62)
         # ---- far bank row: varied crowns, irregular spacing with gaps that show the town behind
         self.bins_far = []
         hcol_f = np.array([0.8, 0.85, 0.97], np.float32)
@@ -940,15 +967,18 @@ class Scene:
                 k = f * ss / Z
                 tr_rng = np.random.default_rng(5000 + i)
                 # round 11: varied size / shape per tree (height, spread, clump size, lean all random)
-                tree = R23.Tree23(tr_rng, dobuki=0.5, lean=float(tr_rng.choice([-1.0, 1.0], p=[0.35, 0.65])),
+                tree = R26.Tree26(tr_rng, dobuki=0.5, lean=float(tr_rng.choice([-1.0, 1.0], p=[0.35, 0.65])),
                                   scale=0.9 * sc, big=False, spread=tr_rng.uniform(0.75, 1.2),
                                   hmul=tr_rng.uniform(0.8, 1.2), density=1.3, trunk=0.8,
                                   cl=max(1.0, Z / 20.0) ** 0.6, maxd=3)
                 ldx, ldy = sx - bx, sy - by
                 ln = math.hypot(ldx, ldy) + 1e-6
                 wpx = W / 1920.0
-                pnt = R23.Painter23(k, sun_dir=(ldx / ln, ldy / ln), px=ss * wpx, detail=0.4, far=True)
+                pnt = R26.Painter26(k, sun_dir=(ldx / ln, ldy / ln), px=ss * wpx, detail=0.4, far=True)
                 card, ox, oy = pnt.paint(tree, tr_rng)
+                card = R26.regrade26(card, (ldx / ln, ldy / ln), ss * wpx, far=True,
+                                     clump_px=(k * tree.rc_med) if tree.rc_med else None,
+                                     clumps=R26.clumps_px(tree, k, ox, oy))
                 hz = 0.5 * (1.0 - math.exp(-Z / 150.0))       # round 16: pinker far row, keep structure
                 T2.haze_card(card, hz, hcol_f)
                 rgba, x0, y0 = T2.card_to_screen(card, ox, oy, float(bx), float(by), ss)
@@ -1180,7 +1210,43 @@ class Scene:
         E.over_shift(img, self.overlay, 0, 0, 0.0)
         # soften: water is never a perfect mirror
         # vertical streaking (reflections stretch down), little horizontal blur so trunks / buildings stay legible
-        img = cv2.GaussianBlur(img, (0, 0), sigmaX=max(0.6, 0.0008 * W), sigmaY=max(1.0, 0.004 * W))
+        # round 26: saturated sign colours (red / green / yellow boards) are reflected as short broken horizontal
+        # ripple dashes with gaps, not vertical streaks: split them off, keep the rest of the reflection as it was
+        mx, mn = img.max(-1), img.min(-1)
+        sat = (mx - mn) / np.maximum(mx, 1e-3)
+        sgm = ((sat > 0.42) & (img[..., 2] < 0.78 * np.maximum(img[..., 0], img[..., 1])) & (mx > 0.25))
+        sgm = cv2.dilate(sgm.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(np.float32)
+        keep = 1.0 - sgm
+        sgb = max(3.0, 0.008 * W)
+        base = cv2.GaussianBlur(img * keep[..., None], (0, 0), sgb) /             np.maximum(cv2.GaussianBlur(keep, (0, 0), sgb), 1e-3)[..., None]
+        base = img * keep[..., None] + base * sgm[..., None]
+        blur = lambda a_: cv2.GaussianBlur(a_, (0, 0), sigmaX=max(0.6, 0.0008 * W), sigmaY=max(1.0, 0.007 * W))
+        img_b = blur(img)
+        base_b = blur(base)
+        # dash pattern: rows ~3 px tall every ~7 px, each row broken into 10-34 px dashes with 6-16 px gaps
+        u = W / 1920.0
+        per, on = max(4, int(round(7 * u))), max(2, int(round(3 * u)))
+        yy = np.arange(H)
+        row = yy // per
+        inrow = ((yy % per) < on).astype(np.float32)
+        rng_ = np.random.default_rng(2626)
+        dash = np.zeros((H, Wc), np.float32)
+        nrow = int(row.max()) + 1
+        for rI in range(nrow):
+            ys_ = np.nonzero((row == rI) & (inrow > 0))[0]
+            if len(ys_) == 0:
+                continue
+            x = -rng_.uniform(0, 30 * u)
+            line = np.zeros(Wc, np.float32)
+            while x < Wc:
+                L_ = rng_.uniform(10, 34) * u
+                a0_, a1_ = int(max(x, 0)), int(min(x + L_, Wc))
+                if a1_ > a0_:
+                    line[a0_:a1_] = 1.0
+                x += L_ + rng_.uniform(6, 16) * u
+            dash[ys_] = line[None]
+        dash = cv2.GaussianBlur(dash, (0, 0), 0.6 * max(u, 0.5))
+        img = base_b + (img_b - base_b) * (dash * 1.25)[..., None]
         self.refl = img.astype(np.float32)
 
     # ================================================================== petals
@@ -1325,10 +1391,11 @@ class Scene:
         sun_x, sun_y = self.sun_xy
         # far plate with water
         buf = self.far_pm.copy()
-        E.water_kernel(buf, self.w_y, self.w_x, self.w_u, self.w_s, self.w_Z, self.w_a, self.w_ry, self.refl,
-                       self.ywb, float(t), float(f), float(sun_x + self.emx), float(2 * cam.hy - sun_y),
-                       np.array([0.02, 0.15, 0.4], np.float32), np.array([0.7, 0.55, 0.37], np.float32),
-                       self.far_invz, float(f * tx))
+        # round 24: clean broken horizontal reflection strokes over a dark teal-blue base
+        R24.water24(buf, self.w_y, self.w_x, self.w_u, self.w_s, self.w_Z, self.w_a, self.w_ry, self.refl,
+                    self.ywb, float(t), float(f), float(sun_x + self.emx), float(2 * cam.hy - sun_y),
+                    np.array([0.04, 0.2, 0.3], np.float32), np.array([0.7, 0.55, 0.37], np.float32),
+                    self.far_invz, float(f * tx))
         far = self._far_rgba
         np.multiply(buf, self._far_ia, out=far[..., :3])
         E.over_shift_map(img, far, -self.emx, 0, self.far_invz, float(f * tx))
@@ -1380,8 +1447,10 @@ class Scene:
         img = SFX.bloom_fast(img, threshold=0.93, knee=0.28, strength=0.24, halation=0.07)
         img += self.flare.render(sun_x, sun_y, vis=0.35 + 0.65 * vis, rot=0.02 * t,
                                       center=(W / 2 - tx * 0.08 * W, H / 2))
+        self.sun24.render(img, sun_x, sun_y, t, vis=0.6 + 0.4 * vis)
         img = F.shoulder(img, 0.82, desat=0.2)
         img *= self.paper
+        self.sun24.core(img, sun_x, sun_y)
         return F.finish_fast(img, t, sat=1.05, grain_amt=0.0, vig=0.2, ca=0.0005)
 
     def _warm_grade(self, img):
@@ -1658,7 +1727,7 @@ class Scene:
         x = self._ws_x - self.emx - f * tx * self.far_invz[self._ws_py, self._ws_px]
         n1 = 34
         # round 9: clusters of bright star glints in the sun's glitter path (sizes fixed, gentle twinkle)
-        SFX.sparkles(W, H, x[:n1], self._ws_y[:n1], size=self._ws_sz[:n1] * 0.8, inten=self._ws_in[:n1] * 1.5,
+        # round 24: ~70% fewer star glints - a few deliberate ones on the sun path only
+        k1 = 10
+        SFX.sparkles(W, H, x[:k1], self._ws_y[:k1], size=self._ws_sz[:k1] * 0.8, inten=self._ws_in[:k1] * 1.3,
                      t=t, seed=7, out=img)
-        SFX.sparkles(W, H, x[n1:], self._ws_y[n1:], size=self._ws_sz[n1:] * 0.6, inten=self._ws_in[n1:] * 0.6,
-                     t=t, seed=9, out=img)

@@ -101,10 +101,11 @@ class Scene:
         # and gather into curved, meandering mackerel bands that compress toward the horizon
         # Two palettes per layer (same cloudlets): hot gold near the sun, cool pink / violet undersides far
         # from it, blended by the distance to the sun so the sun area holds the value focus.
-        warm = dict(lit=(1.7, 1.0, 0.52), body=(0.95, 0.56, 0.5), under=(0.62, 0.36, 0.5), haze_col=(1.1, 0.7, 0.5))
-        cool = dict(lit=(1.15, 0.68, 0.76), body=(0.58, 0.44, 0.7), under=(0.36, 0.27, 0.58), haze_col=(0.85, 0.55, 0.62))
+        # blue-grey / lilac bodies, a gold (sun side) or rose (far side) lit underside facing the low sun
+        warm = dict(lit=(1.85, 1.1, 0.5), body=(0.72, 0.52, 0.62), under=(0.46, 0.36, 0.58), haze_col=(1.1, 0.7, 0.5))
+        cool = dict(lit=(1.25, 0.74, 0.68), body=(0.5, 0.46, 0.7), under=(0.33, 0.3, 0.58), haze_col=(0.85, 0.55, 0.62))
         fk = dict(fov=FOV, alt=3.2, cell_stretch=0.8, warp=1.7, angle=az, region=(0.0, 0.9), z_haze=45.0,
-                  a_lo=0.12, a_hi=0.34, lumps=1.0, lit_screen=(0.0, 4.0), opacity=0.95, haze_fade=0.35,
+                  a_lo=0.12, a_hi=0.34, lumps=1.0, lit_screen=(0.0, 5.0), opacity=0.95, haze_fade=0.35,
                   veil=0.12, edge_px=1.1)
         l1 = dict(seed=21, cell=0.26, row_l=0.55, patch=3.2, patch_thr=-0.12, cover=0.55)
         l2 = dict(seed=33, cell=0.5, row_l=0.9, patch=4.5, patch_thr=-0.1, cover=0.55, angle=az + 12, warp=2.2)
@@ -162,10 +163,18 @@ class Scene:
             by = base_at(Z) + 0.35 * f / Z
             # the big left massif is far off the sun axis: hazed toward the horizon colour, a faint rim only
             left = (b < 0.4)
+            # (the left massif: a crisp lit ridge on its sun side, aerial perspective only inside it)
             P = SM.far_peak_plate(PW, PH, ox + a * W, ox + b * W, by, hu * f / Z, pks, sd, sun_p, sc,
-                                  col=c0, lit=c1, haze_col=(0.74, 0.52, 0.64) if left else hc,
-                                  rim_amt=0.0 if left else (0.9 if Z < 50 else 0.6),
-                                  aerial=0.42 if left else 0.0, face_blur=40.0 if left else 2.0)
+                                  col=c0, lit=(0.62, 0.47, 0.64) if left else c1,
+                                  haze_col=(0.84, 0.62, 0.7) if left else hc,
+                                  rim_col=(1.5, 0.95, 0.72) if left else (1.9, 1.15, 0.6),
+                                  rim_amt=0.85 if left else (0.9 if Z < 50 else 0.6),
+                                  aerial=0.3 if left else 0.0, face_blur=3.0 if left else 2.0,
+                                  face_fall=(0.0, 0.22) if left else (0.2, 0.9),
+                                  crest=dict(band=12.0) if left else None)
+            # the base dissolves into the cloud sea (no hard plate edge where the rows pass under it)
+            yv_ = np.arange(PH, dtype=F32)[:, None]
+            P[..., 3] *= C.smoothstep(by + 1.0, by - 0.045 * H, yv_)
             self.peaks.append((P, Z))
         self.pk = pk
 
@@ -244,15 +253,22 @@ class Scene:
         # into three depth groups for parallax (far -> near)
         fl = FL.Floor(PW, PH, W, hy, sun_p, sc, y_start=hy + 0.11 * H, seed=7)
         self.floor = []
-        for (P, Rr, q, _rows) in fl.paint(groups=((0.0, 0.14), (0.14, 0.34), (0.34, 0.62), (0.62, 1.01))):
-            # physical parallax of the group's mean row line (depth = DK / Z, Z = f / (y - horizon))
+        # six depth bands with graded parallax (far rows barely move, the nearest band ~0.7 of the summit)
+        ys0 = hy + 0.11 * H
+        for (P, Rr, q, _rows) in fl.paint(groups=((0.0, 0.07), (0.07, 0.16), (0.16, 0.28), (0.28, 0.42),
+                                                  (0.42, 0.6), (0.6, 1.01))):
             ya = P[..., 3].sum(1)
             ym = float((np.arange(PH) * ya).sum() / max(ya.sum(), 1e-3))
-            dep = float(np.clip(DK * 1.5 * (ym - hy) / f, 0.08, 0.7))
-            self.floor.append((P, Rr, dep, 0.0004 + 0.0075 * dep))
+            qn = float(np.clip((ym - ys0) / (PH - ys0), 0.0, 1.0))
+            dep = 0.1 + 0.68 * qn ** 1.15
+            if qn < 0.3:
+                P = self._strata(P, 0.045, 0.85)
+                Rr = self._strata_rim(Rr, 0.045)
+            self.floor.append((P, Rr, dep, 0.0003 + 0.0075 * dep))
+        self.build_hzband()
         # far-left cloud bank in front of the big massif's base (lit top edge, lost base)
         fb = FL.Floor(PW, PH, W, hy, sun_p, sc, y_start=hy + 0.11 * H, seed=19)
-        self.bank = fb.bank(ox - 0.04 * W, ox + 0.36 * W, oy + 0.515 * H, 16.0, 34.0, 0.05, seed=23, tint=(0.86, 0.84, 0.9), lit_col=(0.8, 0.6, 0.66))
+        self.bank = fb.bank(ox - 0.04 * W, ox + 0.36 * W, oy + 0.515 * H, 16.0, 34.0, 0.05, seed=23, tint=(0.9, 0.84, 0.88), lit_col=(1.05, 0.72, 0.66))
         yb_ = oy + 0.5 * H
         self.bank_dep = float(np.clip(DK * 1.5 * (yb_ - hy) / f, 0.05, 0.7))
         self.wisp = SM.wisp_plate(PW, PH, ox + 0.5 * W, PW, oy + 0.7 * H, 0.03 * H, 41, sun_p, sc)
@@ -265,6 +281,77 @@ class Scene:
         warm = np.exp(-(xs_ / 0.3) ** 2)[..., None]
         mcol = np.array([0.95, 0.66, 0.72], F32) * (1 - warm) + np.array([1.35, 0.95, 0.55], F32) * warm
         self.mist = (mcol * mist[..., None]).astype(F32)          # premultiplied, additive
+
+    def _strata(self, P, depth_h, amt):
+        """Merge the far puffs into horizontal strata: a horizontal smear (premultiplied) that grows toward the
+        horizon, and the in-row contrast pulled toward the row's smeared value (no tiled stamp shapes)."""
+        H, hy, sc = self.H, self.hy, self.sc
+        a = P[..., 3:]
+        pm = np.dstack([P[..., :3] * a, a]).astype(F32)
+        k1 = int(61 * sc) | 1
+        k2 = int(17 * sc) | 1
+        b1 = cv2.blur(pm, (k1, 1))
+        b1 = cv2.GaussianBlur(b1, (0, 0), sigmaX=4.0 * sc, sigmaY=1.2 * sc)
+        b2 = cv2.blur(pm, (k2, 1))
+        yy = np.arange(P.shape[0], dtype=F32)[:, None, None]
+        dy = np.maximum(yy - hy, 0.0) / H
+        w1 = amt * np.exp(-dy / depth_h)
+        w2 = np.clip(amt * 0.8 * np.exp(-dy / (2.2 * depth_h)) - w1, 0, 1)
+        out = pm * (1 - w1 - w2) + b1 * w1 + b2 * w2
+        a2 = out[..., 3:]
+        rgb = out[..., :3] / np.maximum(a2, 1e-4)
+        return np.dstack([rgb, a2]).astype(F32)
+
+    def _strata_rim(self, R, depth_h):
+        H, hy, sc = self.H, self.hy, self.sc
+        b = cv2.blur(R, (int(31 * sc) | 1, 1))
+        yy = np.arange(R.shape[0], dtype=F32)[:, None, None]
+        w = 0.8 * np.exp(-np.maximum(yy - hy, 0.0) / H / depth_h)
+        return (R * (1 - w) + b * w * 0.8).astype(F32)
+
+    def build_hzband(self):
+        """The far cloud sea between the horizon and the painted floor: a dense band of tiny back-lit
+        scallop rows (gold rims on the sun path) that compress into the luminous horizon and dissolve
+        into aerial haze just under the horizon line (replaces the ray-marched deck's streaks there)."""
+        W, H, PW, PH, ox, oy, hy, f, sun_p, sc = (self.W, self.H, self.PW, self.PH, self.ox, self.oy, self.hy,
+                                                  self.f, self.sun_p, self.sc)
+        fh = FL.Floor(PW, PH, W, hy, sun_p, sc, y_start=hy + 0.009 * H, seed=31, size=0.3)
+        out = fh.paint(groups=((0.0, 1.01),), y_end=hy + 0.13 * H)
+        P, Rr = out[0][0], out[0][1]
+        P = self._strata(P, 0.075, 0.95)
+        Rr = self._strata_rim(Rr, 0.075)
+        yy = np.arange(PH, dtype=F32)[:, None]
+        xx = np.arange(PW, dtype=F32)[None, :]
+        dy = np.maximum(yy - hy, 0.0) / H
+        xs = (xx - sun_p[0]) / W
+        sunp = np.exp(-(xs / 0.13) ** 2)                 # the sun path down the cloud sea
+        sunw = np.exp(-(xs / 0.32) ** 2)
+        # aerial haze: toward the horizon the rows melt into the glowing horizon colour
+        hz = np.exp(-dy / 0.055)
+        hcol = (np.array([0.78, 0.58, 0.72], F32) * (1 - sunw[..., None]) +
+                np.array([1.25, 0.86, 0.6], F32) * sunw[..., None])
+        # broad drifting haze banks: in places the far rows dissolve completely into the aerial haze (no
+        # constant-contrast repetition of the same small scallop out to the horizon)
+        pn = K._noise(PW, PH, max(PW / (320.0 * sc), 3), 133, 3, stretch=4.0)
+        patch = C.smoothstep(-0.15, 0.45, pn) * np.exp(-dy / 0.09)
+        k = np.clip(0.88 * hz + 0.06 + 0.4 * patch, 0, 0.96)[..., None] * (0.7 + 0.3 * sunw[..., None])
+        rgb = P[..., :3] * (1 - k) + hcol * k
+        # the sun path: the heads under the sun glow from within (back-lit), brightest near the horizon
+        glow = sunp * np.exp(-dy / 0.07)
+        rgb = rgb + glow[..., None] * np.array([0.95, 0.66, 0.36], F32)
+        a = P[..., 3:] * C.smoothstep(hy + 0.003 * H, hy + 0.012 * H, yy)[..., None]
+        # fade the bottom rows into the painted floor below (it starts at hy + 0.11 H)
+        self.hzb = np.dstack([rgb, a]).astype(F32)
+        rim = Rr * (0.8 + 2.4 * sunp)[..., None] * (1 - 0.35 * hz)[..., None]
+        # gold glitter sheet on the far cloud floor under the sun: broken hairline sparkles along the rows
+        gl1 = K._noise(PW, PH, max(PW / (3.0 * sc), 4), 131, 2, stretch=10.0)
+        gl2 = K._noise(PW, PH, max(PW / (25.0 * sc), 4), 132, 2, stretch=6.0)
+        spark = C.smoothstep(0.35, 0.75, gl1 + 0.35 * gl2) * np.exp(-(xs / 0.09) ** 2) * np.exp(-dy / 0.05)
+        spark = spark * C.smoothstep(hy + 0.004 * H, hy + 0.01 * H, yy)
+        rim = rim + (spark * 1.1)[..., None] * np.array([1.4, 1.0, 0.55], F32)
+        self.hzb_rim = (rim * a).astype(F32)
+        ym = hy + 0.06 * H
+        self.hzb_dep = float(np.clip(DK * 1.5 * (ym - hy) / f, 0.03, 0.7))
 
     def build_fg(self):
         W, H, PW, PH, ox, oy, sun_p = self.W, self.H, self.PW, self.PH, self.ox, self.oy, self.sun_p
@@ -295,8 +382,10 @@ class Scene:
         band_ = rows_ * C.smoothstep(-0.2, 0.35, nb) * C.smoothstep(0.0, 0.004, d) * C.smoothstep(0.075, 0.01, d)
         band_ = band_ * (0.25 + 0.75 * np.exp(-((X - self.sun0[0]) / (0.3 * W)) ** 2))
         self.hband = (band_[..., None] * np.array([1.0, 0.82, 0.62], F32) * 0.3).astype(F32)
-        self.hglow = (wide[..., None] * np.array([1.0, 0.62, 0.3], F32) * 0.18 +
-                      line[..., None] * np.array([1.0, 0.93, 0.78], F32) * 0.95 +
+        halo = np.exp(-(d / 0.022) ** 2) * np.exp(-((X - self.sun0[0]) / (0.35 * W)) ** 2)
+        self.hglow = (wide[..., None] * np.array([1.0, 0.62, 0.3], F32) * 0.3 +
+                      halo[..., None] * np.array([1.0, 0.6, 0.32], F32) * 0.12 +
+                      line[..., None] * np.array([1.0, 0.93, 0.78], F32) * 1.2 +
                       core[..., None] * np.array([1.0, 0.95, 0.85], F32) * 0.9).astype(F32)
         # sun star: long thin rays (vertical / horizontal longest, diagonals shorter), cached 2x sprite
         cw, ch = 2 * W, 2 * H
@@ -351,6 +440,9 @@ class Scene:
         self.g_w = (k_w * below).astype(F32)
         self.g_f = k_f.astype(F32)
         self.g_c = ((1 - prox) * below * (1 - k_f)).astype(F32)
+        # end swell: the whole lit sea warms and brightens (strongest along the sun column, all the way down)
+        self.g_s = (below * (0.45 + 0.55 * np.exp(-((xx - sx) / (0.4 * W)) ** 2)) *
+                    (1 - 0.4 * C.smoothstep(0.75 * H, 1.0 * H, yy))).astype(F32)
 
     def _grade(self, img):
         lum = img.mean(-1)
@@ -440,6 +532,35 @@ class Scene:
             disc = C.smoothstep(1.05, 0.8, q) * (0.45 + 0.55 * C.smoothstep(0.2, 1.0, q)) +                 0.35 * np.exp(-((q - 1.0) / 0.25) ** 2) * (q < 1.6)
             out[b0y:b1y, b0x:b1x] += disc[..., None] * col * a
         return out * amt
+
+    def _ring(self, sx, sy, cx, cy):
+        """End-swell lens artefacts (yn_02): a faint chromatic halo ring around the sun and one soft ringed
+        ghost disc on the sun -> centre axis beyond the centre. Additive, cached sprites."""
+        W, H = self.W, self.H
+        if not hasattr(self, '_ring_c'):
+            yy, xx = np.mgrid[0:2 * H, 0:2 * W].astype(F32)
+            r = np.sqrt((xx - W) ** 2 + (yy - H) ** 2) / H
+            R0, wd = 0.34, 0.012
+            ring = np.dstack([np.exp(-((r - R0 * k) / wd) ** 2) for k in (1.0, 0.985, 0.97)])
+            ring = ring * np.array([1.0, 0.8, 0.9], F32) * 0.05
+            ring += (np.exp(-(r / 0.3) ** 2) * 0.012)[..., None] * np.array([1.0, 0.7, 0.45], F32)
+            self._ring_c = ring.astype(F32)
+            g = int(0.09 * H)
+            gy, gx = np.mgrid[-g:g + 1, -g:g + 1].astype(F32)
+            q = np.sqrt(gx * gx + gy * gy) / (0.07 * H)
+            disc = C.smoothstep(1.02, 0.9, q) * (0.25 + 0.75 * C.smoothstep(0.3, 1.0, q)) +                 0.9 * np.exp(-((q - 0.98) / 0.05) ** 2)
+            self._ghost_c = (disc[..., None] * np.array([0.55, 0.75, 1.0], F32) * 0.045).astype(F32)
+        M = np.array([[1, 0, sx - W], [0, 1, sy - H]], np.float32)
+        out = cv2.warpAffine(self._ring_c, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        k = 1.55
+        gx_, gy_ = sx + (cx - sx) * k, sy + (cy - sy) * k
+        g = self._ghost_c.shape[0] // 2
+        x0, y0 = int(gx_) - g, int(gy_) - g
+        xa, ya = max(x0, 0), max(y0, 0)
+        xb, yb = min(x0 + 2 * g + 1, W), min(y0 + 2 * g + 1, H)
+        if xb > xa and yb > ya:
+            out[ya:yb, xa:xb] += self._ghost_c[ya - y0:yb - y0, xa - x0:xb - x0]
+        return out
 
     def _fan(self, sx, sy):
         """Painted crepuscular wedges radiating from the sun and fanning DOWN across the cloud sea: broad
@@ -533,13 +654,33 @@ class Scene:
         return y0, L
 
     def _floor_comp(self, img, P, Rr, t, spd, cam, zoom, dep, light):
+        # secondary motion: each depth band breathes (a slow, slight swell of its own, out of phase)
+        zoom = zoom * (1.0 + 0.006 * dep * dep * math.sin(2 * math.pi * t / 4.7 + 7.0 * dep))
         y0, L = self._band(P, t, spd, cam, zoom, dep)
         if L is None:
             return img
         img = self._comp(img, y0, L)
         y0r, Lr = self._band(Rr, t, spd, cam, zoom, dep, rows_of=P)
-        _add(img[y0r:y0r + Lr.shape[0]], Lr, 0.75 + 0.35 * light)
+        _add(img[y0r:y0r + Lr.shape[0]], Lr, 0.75 + 0.35 * light + self._swell)
         return img
+
+    def _wrap_facing(self, oq, sx, sy):
+        h, w = oq.shape
+        if not hasattr(self, '_qgrid'):
+            self._qgrid = np.mgrid[0:h, 0:w].astype(F32)
+        qy, qx = self._qgrid
+        ob = cv2.GaussianBlur(oq.astype(F32), (0, 0), 1.2)
+        gx = cv2.Sobel(ob, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(ob, cv2.CV_32F, 0, 1, ksize=3)
+        gn = np.sqrt(gx * gx + gy * gy) + 1e-6
+        nx, ny = -gx / gn, -gy / gn
+        lx, ly = sx / 4.0 - qx, sy / 4.0 - qy
+        ln = np.sqrt(lx * lx + ly * ly) + 1e-3
+        lx, ly = lx / ln, ly / ln - 0.6
+        ln = np.sqrt(lx * lx + ly * ly) + 1e-6
+        f = np.clip((nx * lx + ny * ly) / ln, 0, 1)
+        f = C.smoothstep(0.1, 0.55, f)
+        return cv2.GaussianBlur(f.astype(F32), (0, 0), 1.0)
 
     def _comp(self, img, y0, L):
         if L is not None:
@@ -559,6 +700,7 @@ class Scene:
         light = 0.78 + 0.27 * C.ease_in_out_sine(min(u * 1.1, 1.0))       # light swells
         e = C.smoothstep(0.7, 1.0, u)                                      # final swell
         e2 = C.smoothstep(0.75, 1.0, u)                                    # triumphant peak (last 1.5 s)
+        self._swell = 0.9 * e2
         # sun climbs slowly (fixed at infinity: tiny parallax)
         sx = self.sun0[0]
         sy = self.sun0[1] - 0.024 * H * p
@@ -572,10 +714,13 @@ class Scene:
             deck[..., :3] += dhot * (0.5 * e)
         img = K.composite(img, deck)
         _add(img, self.hband, light)
+        spd_h = 0.0004 + 0.0075 * self.hzb_dep
+        img = self._floor_comp(img, self.hzb, self.hzb_rim, t, spd_h, cam, zoom, self.hzb_dep, light)
         for P, Z in sorted(self.peaks, key=lambda q: -q[1]):
             y0, L = self._band(P, t, 0.0, cam, zoom, DK / Z)
             if L is not None:
-                L[..., 3] *= np.clip((Zw[y0:y0 + L.shape[0]] - (Z - 1.5)) / 3.0, 0, 1)
+                if Z > 30.0:     # (the near left massif stands clear of the deck: no per-pixel cut)
+                    L[..., 3] *= np.clip((Zw[y0:y0 + L.shape[0]] - (Z - 1.5)) / 3.0, 0, 1)
                 img = self._comp(img, y0, L)
         img = self._comp(img, *self._band(self.bank, t, 0.0004 + 0.0075 * self.bank_dep, cam, zoom, self.bank_dep))
         if self.floor:
@@ -587,6 +732,12 @@ class Scene:
         Lm = K.drift(self.mist, W, H, t, speed=0.004, cam=cam, zoom=zoom, depth=0.35)
         _add(img, Lm, 0.18 + 0.12 * light)
         img = self._grade(img)
+        if e > 0.0:
+            # light swell spreading across the sea: brighter lit tops (value-weighted), warmer mid-ground
+            gs = (self.g_s * np.float32(0.35 * e + 0.65 * e2))[..., None]
+            lum_ = np.clip(img.mean(-1, keepdims=True), 0, 1.5)
+            img = img * (1 + gs * (np.array([0.18, 0.1, 0.02], F32) + 0.18 * lum_)) + gs * np.array([0.025, 0.014, 0.004], F32)
+            img = img.astype(F32)
         # god-ray fan spreading from the sun over the cloud sea (swells at the end; behind the summit)
         # the shafts breathe slowly (two incommensurate slow sines, smooth, no flicker)
         breath = 1.0 + 0.14 * math.sin(2 * math.pi * t / 3.3 + 0.7) + 0.07 * math.sin(2 * math.pi * t / 1.9 + 2.1)
@@ -600,8 +751,20 @@ class Scene:
         rs = K.drift(self.fgRs, W, H, t, speed=0.0, cam=cam, zoom=zoom, depth=1.0)
         rd = K.drift(Rd, W, H, t, speed=0.0, cam=cam, zoom=zoom, depth=1.0)
         atm = self._atmo(sx, sy)
-        _add(img, atm, 0.55 * light ** 2 * (1 + 0.25 * e2))
+        _add(img, atm, 0.55 * light ** 2 * (1 + 0.6 * e2))
+        wrap_src = img
         img = K.composite(img, fs, fd)
+        # light wrap: the bright horizon / sun path bleeds a few px into the backlit silhouettes (halation)
+        occ0 = K.occluder(fs, fd)
+        q4 = cv2.resize(wrap_src, (W // 4, H // 4), interpolation=cv2.INTER_AREA)
+        oq = cv2.resize(occ0, (W // 4, H // 4), interpolation=cv2.INTER_AREA)
+        bq = np.clip(q4.max(-1) - 0.55, 0, None) * (1 - oq)          # only light from the uncovered background
+        bq = cv2.GaussianBlur(bq, (0, 0), 1.6 * self.sc) * 1.6
+        # the wrap only bleeds over edges turned to the sun (up / sun side): no halo outlining the
+        # silhouettes on their far sides (torii left edges, pad undersides)
+        bq = bq * self._wrap_facing(oq, sx, sy)
+        wrap = cv2.resize(bq, (W, H), interpolation=cv2.INTER_LINEAR) * occ0
+        _add(img, wrap[..., None] * np.array([1.0, 0.62, 0.34], F32), (0.55 + 0.5 * e2) * light)
         rim_g = (0.8 + 0.25 * light) * (1.0 + 0.45 * e)
         _add(img, np.ascontiguousarray(rs[..., :3]), rim_g)
         _add(img, np.ascontiguousarray(rd[..., :3]), rim_g)
@@ -616,6 +779,8 @@ class Scene:
         _add(img, self.flare.render(sx, sy, intensity=(0.4 + 0.6 * vis) * shim * light * (1 + 0.05 * e + 0.1 * e2), t=t,
                                     center=cen))
         _add(img, self._ghosts(sx, sy, cen[0], cen[1], (0.5 + 0.5 * vis) * light * (1 + 0.4 * e)))
-        img = self._bloom(img, 1.0 - 0.03 * e, 0.15 + 0.03 * e + 0.02 * e2, 0.12 + 0.05 * e + 0.08 * e2, occ=occ)
+        if e2 > 0.0:
+            _add(img, self._ring(sx, sy, cen[0], cen[1]), e2 * (0.5 + 0.5 * vis) * light)
+        img = self._bloom(img, 1.0 - 0.03 * e - 0.05 * e2, 0.15 + 0.03 * e + 0.07 * e2, 0.12 + 0.05 * e + 0.2 * e2, occ=occ)
         img = F.shoulder(img, 0.88, 0.05)
         return F.finish_fast(img, t, exposure=0.97 + 0.06 * light, sat=1.06, grain_amt=0.004, vig=0.28, ca=0.0008)

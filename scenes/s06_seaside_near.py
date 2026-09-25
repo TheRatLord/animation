@@ -16,6 +16,7 @@ import s06_seaside_paint as P
 import s06_seaside_foliage as FO
 import s06_seaside_leaf as LF
 import s06_seaside_tree as TR
+import s06_seaside_tree9 as T9
 
 FONT = 'C:/Windows/Fonts/YuGothB.ttc'
 Z_POLE = 5.4
@@ -93,7 +94,7 @@ class Near:
         wgt = P.Canvas(self.cw, self.ch)
         self._bush(back)
         self._pole(back)
-        self._fence(back)
+        # (the foreground pipe fence is left out: at the end of the crane it entered as two flat bars)
         self._pampas(front, wgt)
         w = wgt.straight()
         return dict(back=back.straight(), front=front.straight(), front_w=w[..., 0] * w[..., 3],
@@ -112,7 +113,7 @@ class Near:
         lob = [(self.X(-0.06), 0.98 * H + T, 0.1 * W, 0.0, 0), (self.X(0.02), 0.93 * H + T, 0.075 * W, 0.0, 0),
                (self.X(0.075), 0.99 * H + T, 0.06 * W, 0.0, 0), (self.X(0.12), 1.04 * H + T, 0.05 * W, 0.0, 0),
                (self.X(-0.02), 1.04 * H + T, 0.08 * W, 0.0, 0)]
-        TR.canopy(cv, lob, rng, unit=u * 1.6, pal=TR.PAL_DARK, form=0.12 * W, far_haze=0.0, bias=-0.15)
+        T9.canopy9(cv, lob, rng, unit=u * 2.0, far_haze=0.0, holes=0, expo=0.6, ex_floor=0.08)
         dark = cc('#101824')
         rim = cc('#ffab66')
         for k in range(30):
@@ -168,7 +169,17 @@ class Near:
         body = body + (np.array([1.7, 0.95, 0.5], np.float32) - body) * (rim ** 1.2 * 0.95)[..., None]
         # cool sky bounce on the far edge
         body = body + cc('#5a5aa0') * (C.smoothstep(0.75, 1.0, nn) * 0.12)[..., None]
-        # pole number plate seams / horizontal rings
+        # a crisp warm specular stripe just inside the rim (glazed concrete catching the low sun)
+        spec = np.exp(-((nn + 0.7) / 0.07) ** 2) * (0.55 + 0.45 * vg[..., 0]) * (0.8 + 0.4 * tex)
+        body = body + np.array([1.25, 0.66, 0.34], np.float32) * (0.42 * spec)[..., None]
+        # faint horizontal casting joints (a lit notch on the sun side, dark line across)
+        for fy_ in (0.18, 0.43, 0.71):
+            jl = np.exp(-(((gy - y0) / h - fy_) * h / (1.1 * u)) ** 2)
+            body = body * (1 - 0.3 * jl * C.smoothstep(-0.8, 0.2, nn))[..., None]
+            body = body + np.array([1.0, 0.55, 0.3], np.float32) * (0.5 * jl * rim)[..., None]
+        # lost, soft edge on the shade (right) side
+        dR = (1 - nn) * hw
+        r = (m * np.clip(dR / (3.2 * u) + 0.1, 0, 1) ** 0.8, x0, y0)
         cv.put(r, body)
         self.pole = (xc, wb, wt, y_top, y_bot)
 
@@ -195,6 +206,14 @@ class Near:
             cv.line([(xs0, yy), (xc + side * (hwk + L), yy)], th, cc('#26243c'))
             cv.line([(xc + side * (hwk + L), yy - th * 0.5), (xc + side * (hwk + L), yy - th * 1.6)], th * 0.8,
                     cc('#26243c'))
+            # rust bleeding down the concrete from the bolt (tapered, broken streaks)
+            rr_ = np.random.default_rng(900 + k)
+            for j in range(int(rr_.integers(1, 3))):
+                ox_ = xs0 + rr_.normal(0, th * 0.6)
+                ln_ = f * rr_.uniform(0.12, 0.3) / Z
+                pts_ = [(ox_ + 0.12 * th * math.sin(q * 0.9 + j), yy + th + q * ln_ / 4) for q in range(5)]
+                for q in range(4):
+                    cv.line(pts_[q:q + 2], th * (0.5 - 0.08 * q), cc('#5e3428'), 0.4 * (1 - q / 4.5))
             # nut where the bolt enters the concrete
             cv.poly([(xs0 - th * 0.9, yy - th * 1.1), (xs0 + th * 0.9, yy - th * 1.1), (xs0 + th * 0.9, yy + th * 1.1),
                      (xs0 - th * 0.9, yy + th * 1.1)], cc('#1c1a2c'))
@@ -264,6 +283,32 @@ class Near:
         band(0.3, 0.5, np.array([1.45, 0.86, 0.5], np.float32), 0.9)   # warm rim on the top (sun) edge
         band(0.42, 0.5, np.array([1.8, 1.25, 0.8], np.float32), 0.8)   # hot specular line
         band(-0.5, -0.4, cc('#5a4a70'), 0.35)               # faint bounce on the underside
+        # joint collars (pipe reducer sleeves) along the arm: slightly proud of the tube, own rim + seams
+        for k in (8, 30, 50):
+            tx_, ty_ = dx_[k] / dl[k], dy_[k] / dl[k]
+            cw2 = f * 0.028 / Z
+            ww2 = wa[k] * 0.62
+            px0, py0 = axs[k], ays[k]
+            quad_ = [(px0 - tx_ * cw2 + nx_[k] * ww2, py0 - ty_ * cw2 + ny_[k] * ww2),
+                     (px0 + tx_ * cw2 + nx_[k] * ww2, py0 + ty_ * cw2 + ny_[k] * ww2),
+                     (px0 + tx_ * cw2 - nx_[k] * ww2, py0 + ty_ * cw2 - ny_[k] * ww2),
+                     (px0 - tx_ * cw2 - nx_[k] * ww2, py0 - ty_ * cw2 - ny_[k] * ww2)]
+            cv.poly(quad_, cc('#2c2a46'))
+            cv.line([quad_[0], quad_[1]], 1.6 * u, np.array([1.7, 1.12, 0.7], np.float32), 0.9)
+            cv.line([quad_[1], quad_[2]], 1.0 * u, cc('#16142a'), 0.8)
+            cv.line([quad_[0], quad_[3]], 1.0 * u, cc('#6a5a80'), 0.5)
+        # bolt plate where the brace meets the pole: a flat bracket with four bolt heads catching the light
+        hwb = half(by0)
+        pl_h = f * 0.07 / Z
+        cv.poly([(xc - hwb - 5 * u, by0 - pl_h), (xc - hwb * 0.1, by0 - pl_h), (xc - hwb * 0.1, by0 + pl_h),
+                 (xc - hwb - 5 * u, by0 + pl_h)], cc('#34304e'))
+        cv.line([(xc - hwb - 5 * u, by0 - pl_h), (xc - hwb * 0.1, by0 - pl_h)], 1.4 * u, cc('#ffb27a'), 0.85)
+        cv.line([(xc - hwb - 5 * u, by0 - pl_h), (xc - hwb - 5 * u, by0 + pl_h)], 1.4 * u, cc('#ff9e70'), 0.6)
+        for (bxo, byo) in ((0.25, -0.55), (0.25, 0.55), (0.75, -0.55), (0.75, 0.55)):
+            bx_b = xc - hwb - 5 * u + (hwb * 0.9 + 5 * u) * bxo
+            by_b = by0 + pl_h * byo
+            cv.line([(bx_b - 0.01, by_b), (bx_b + 0.01, by_b)], 4.2 * u, cc('#201e34'))
+            cv.line([(bx_b - 0.8 * u, by_b - 0.9 * u), (bx_b + 0.4 * u, by_b - 1.1 * u)], 1.3 * u, cc('#ffc890'), 0.9)
         # clamp collar where the arm meets the pole
         yc_ = y0a
         hwk = half(yc_)
@@ -272,6 +317,12 @@ class Near:
                  (xc - hwk - 3 * u, yc_ + cw_)], cc('#302e4a'))
         cv.line([(xc - hwk - 3 * u, yc_ - cw_), (xc - hwk - 3 * u, yc_ + cw_)], 1.8 * u, cc('#ffb07a'), 0.9)
         cv.line([(xc - hwk - 3 * u, yc_ - cw_), (xc + hwk * 0.2, yc_ - cw_)], 1.2 * u, cc('#ffb07a'), 0.7)
+        # bolt heads on the arm clamp collar
+        for k_ in range(3):
+            yb2 = y0a + (k_ - 1) * f * 0.03 / Z
+            xb2 = xc - hwk - 3 * u + 4.0 * u
+            cv.line([(xb2 - 0.01, yb2), (xb2 + 0.01, yb2)], 3.6 * u, cc('#1c1a30'))
+            cv.line([(xb2 - 0.9 * u, yb2 - 0.8 * u), (xb2 + 0.3 * u, yb2 - 1.0 * u)], 1.1 * u, cc('#ffc890'), 0.9)
         # LED housing (flat cobra head), slightly tilted with the arm tip
         hx, hy = axs[-1], ays[-1]
         hl = f * 0.5 / Z

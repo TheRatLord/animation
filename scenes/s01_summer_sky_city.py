@@ -37,6 +37,7 @@ def _h(h):
 
 RIM = _c(1.4, 1.2, 0.92)
 GLINTS = []          # (x, y, size, phase) specular points collected while painting (plate coords)
+SIGNS = []           # (x0, y0, x1, y1) sign boxes in canvas px (kept sharp by the scene's paint pass)
 HAZE = _h('#b8d6f0')
 
 # roof palettes: (top/ridge side, eave side, sky sheen, ridge cap)
@@ -100,7 +101,12 @@ def roof_face(cv, pts, y_top, y_bot, pal, cs, hk, seed, sheen_x=None, lit=1.0):
         # replaced (slightly different) tiles along a course
         colid = np.floor(gx / (tw * 2.6)).astype(np.int64)
         stre = (jit[(colid * 7919 + seed) % 4096] > 0.8) * (0.4 + 0.6 * jit[(colid * 31 + 5) % 4096])
-        c = c * (1 - 0.07 * stre * _ss(0.15, 0.9, v))[..., None]
+        c = c * (1 - 0.2 * stre * _ss(0.15, 0.9, v))[..., None]
+        # lighter lime / salt runs from the ridge on other columns (weathered, never a clean fill)
+        lcol = np.floor(gx / (tw * 2.1)).astype(np.int64)
+        lj = jit[(lcol * 6151 + seed * 7) % 4096]
+        lrun = (lj > 0.9) * _ss(0.0, 0.3, v) * _ss(0.4, 0.1, np.abs(np.mod(gx / (tw * 2.1), 1.0) - 0.5) * 2)
+        c = c + (c.mean(-1, keepdims=True) * np.array([1.1, 1.08, 1.02], np.float32) - c) * (0.35 * lrun * (1 - hk))[..., None]
         # rust runs: warm orange-brown streaks bleeding down from ridge fittings / flashing, narrow and
         # tapering, only on a few columns (weathered, lived-in roofs)
         rcol = np.floor(gx / (tw * 1.7)).astype(np.int64)
@@ -108,10 +114,25 @@ def roof_face(cv, pts, y_top, y_bot, pal, cs, hk, seed, sheen_x=None, lit=1.0):
         rust = (rj > 0.86) * _ss(0.0, 0.25, v) * (1 - _ss(0.4, 1.0, v) * (0.3 + 0.7 * jit[(rcol * 13) % 4096]))
         rw = np.abs(np.mod(gx / (tw * 1.7), 1.0) - 0.5) * 2
         rust = rust * _ss(0.55, 0.15, rw) * (1 - hk)
-        c = c + (np.array([0.5, 0.3, 0.2], np.float32) * c.mean(-1, keepdims=True) * 1.2 - c) * (0.45 * rust)[..., None]
+        c = c + (np.array([0.5, 0.3, 0.2], np.float32) * c.mean(-1, keepdims=True) * 1.2 - c) * (0.6 * rust)[..., None]
         run = np.floor(gx / (tw * 5.0)).astype(np.int64)
         idx = (run * 131 + row * 17 + seed) % 4096
-        c = c * (0.975 + 0.05 * jit[idx])[..., None]
+        c = c * (0.965 + 0.07 * jit[idx])[..., None]
+        # individual tiles vary in value (staggered courses): faded, replaced and darker tiles
+        tid = np.floor(gx / tw + 0.5 * np.mod(row, 2)).astype(np.int64)
+        tj = jit[(tid * 2654435 + row * 97 + seed * 5) % 4096]
+        c = c * (1 + (0.15 * (tj - 0.5) + 0.08 * (tj > 0.93) - 0.1 * (tj < 0.06)) * (1 - 0.6 * hk))[..., None]
+        # broad sun-bleached / damp patches across the face (low-frequency value mottling)
+        ph1, ph2 = (seed % 97) * 0.37, (seed % 89) * 0.53
+        mot = np.sin(gx / (tw * 6.5) + ph1) * np.sin(gy / (cs * 3.1) + gx / (tw * 17.0) + ph2)
+        c = c * (1 + 0.07 * mot * (1 - hk))[..., None]
+        # moss / lichen and grime collecting along the eave courses (patchy, olive), dirt gradient into the eave
+        mc = np.floor(gx / (tw * 3.3)).astype(np.int64)
+        mj = jit[(mc * 911 + seed * 11) % 4096] * 0.6 + 0.4 * jit[(tid * 37 + seed) % 4096]
+        moss = _ss(0.66, 0.95, v) * _ss(0.38, 0.7, mj) * (1 - hk)
+        lum_ = c.mean(-1, keepdims=True)
+        c = c + (lum_ * np.array([0.9, 1.05, 0.55], np.float32) - c) * (0.7 * moss)[..., None]
+        c = c * (1 - 0.1 * _ss(0.8, 1.0, v) * (1 - hk))[..., None]
         # backlit: the tile courses nearest the ridge catch a specular glaze (each lip a bright line)
         spec = np.exp(-v / 0.12) * (0.35 + 0.65 * lip) * lit
         if sx is not None:
@@ -228,7 +249,7 @@ def house(cv, x, y_eave, w, s, rng, hk, kind, wall_h, cs, detail=1.0):
                 pl = (pal[0] * 0.7, pal[1] * 0.75, pal[2] * 0.75, pal[3])
                 roof_face(cv, tri, y_r, y_eave, pl, cs, hk, seed + 9, lit=0.3)
             ridge(cv, (x + sgn * (w / 2 - rl), y_r), (x + sgn * w / 2, y_eave), 0.9 * cs, pal, hk,
-                  1.0 if sgn < 0 else 0.55)
+                  1.0 if sgn < 0 else 0.12)
         ridge(cv, (x - w / 2 + rl, y_r), (x + w / 2 - rl, y_r), 1.1 * cs, pal, hk)
         top_y = y_r
     elif kind == 'gable':
@@ -270,7 +291,7 @@ def house(cv, x, y_eave, w, s, rng, hk, kind, wall_h, cs, detail=1.0):
         cv.lines([[(x - w * 0.05, vy + roof_h * 0.22 * i / 5), (x + w * 0.05, vy + roof_h * 0.22 * i / 5)]
                   for i in range(1, 5)], max(0.6, 0.4 * s), hz(_h('#8894ac'), hk))
         # barge boards with tile edge + rim
-        for p0, p1, rk in ((el, apex, 1.0), (apex, er, 0.5)):
+        for p0, p1, rk in ((el, apex, 1.0), (apex, er, 0.12)):
             cv.lines([[p0, apex if p1 is apex else p1]], max(2.0, 1.6 * cs), hz(pal[1], hk))
             cv.lines([[(p0[0], p0[1] - 0.9 * cs), (p1[0], p1[1] - 0.9 * cs)]], max(0.8, 0.35 * cs), hz(RIM, hk * 0.5), rk)
         # a sliver of the side roof slopes with courses
@@ -284,16 +305,20 @@ def house(cv, x, y_eave, w, s, rng, hk, kind, wall_h, cs, detail=1.0):
                  hz(_h('#3a4460'), hk))
         cv.lines([[(x - w / 2, y_eave + 1.1 * cs), (x + w / 2, y_eave + 1.1 * cs)]], max(1.0, 0.8 * cs),
                  hz(_h('#6a7896'), hk))
-        cv.lines([[(x - w / 2, y_eave + 0.8 * cs), (x + w / 2, y_eave + 0.8 * cs)]], max(0.5, 0.25 * cs),
-                 hz(_h('#e6eefa'), hk * 0.6), 0.8)
-        cv.lines([[(x - w / 2, y_eave - 0.1 * cs), (x + w / 2, y_eave - 0.1 * cs)]], max(0.6, 0.3 * cs),
-                 hz(RIM, hk * 0.6), 0.55)
+        # light edge lines only on the sun-side (left) part of the eave, fading out: no uniform outline
+        for f0, f1, k_ in ((0.0, 0.3, 1.0), (0.3, 0.5, 0.6), (0.5, 0.62, 0.3)):
+            cv.lines([[(x - w / 2 + f0 * w, y_eave + 0.8 * cs), (x - w / 2 + f1 * w, y_eave + 0.8 * cs)]],
+                     max(0.5, 0.25 * cs), hz(_h('#e6eefa'), hk * 0.6), 0.8 * k_)
+            cv.lines([[(x - w / 2 + f0 * w, y_eave - 0.1 * cs), (x - w / 2 + f1 * w, y_eave - 0.1 * cs)]],
+                     max(0.6, 0.3 * cs), hz(RIM, hk * 0.6), 0.55 * k_)
         if cs > 6 * s:
             # half-round gutter: dark underside, bright rolled lip, hangers and a sky-lit top edge
             gy_ = y_eave + 1.6 * cs
             cv.lines([[(x - w / 2, gy_), (x + w / 2, gy_)]], 1.3 * cs, hz(_h('#8a94a8'), hk))
             cv.lines([[(x - w / 2, gy_ + 0.45 * cs), (x + w / 2, gy_ + 0.45 * cs)]], 0.5 * cs, hz(_h('#3e465c'), hk))
-            cv.lines([[(x - w / 2, gy_ - 0.45 * cs), (x + w / 2, gy_ - 0.45 * cs)]], 0.3 * cs, hz(_h('#eef4fc'), hk), 0.9)
+            for f0, f1, k_ in ((0.0, 0.4, 0.9), (0.4, 0.65, 0.5), (0.65, 1.0, 0.18)):
+                cv.lines([[(x - w / 2 + f0 * w, gy_ - 0.45 * cs), (x - w / 2 + f1 * w, gy_ - 0.45 * cs)]], 0.3 * cs,
+                         hz(_h('#eef4fc'), hk), k_)
             nh = max(int(w / (6 * cs)), 2)
             cv.lines([[(x - w / 2 + (k + 0.5) * w / nh, gy_ - 0.9 * cs), (x - w / 2 + (k + 0.5) * w / nh, gy_ + 0.6 * cs)]
                       for k in range(nh)], max(0.8, 0.25 * cs), hz(_h('#4a5268'), hk), 0.9)
@@ -474,6 +499,7 @@ def rooftop_sign(cv, cx, y_roof, w, h, s, hk, text):
     """Rooftop billboard on a steel frame: white panel, blue lettering + band, lit top edge."""
     y1 = y_roof - 0.35 * h
     y0 = y1 - h
+    SIGNS.append((cx - w / 2 - 3, y0 - cv.y0 - 3, cx + w / 2 + 3, y1 - cv.y0 + 3))
     fr = hz(_h('#3a4460'), hk)
     legs = [[(cx - w * 0.4, y1), (cx - w * 0.4, y_roof)], [(cx + w * 0.4, y1), (cx + w * 0.4, y_roof)],
             [(cx - w * 0.4, y_roof), (cx + w * 0.4, y1)]]
@@ -587,7 +613,7 @@ def far_poles(cv, ox, W, H, y_ground, s, hk, rng, n=6):
 
 # =============================================================================================== layers
 # screen-x centres / half widths (fractions of W) of the far rooftop signs
-SIGN_BANDS = [(0.44 + 0.38 * 0.22, 0.05), (0.905, 0.045), (0.07, 0.065)]
+SIGN_BANDS = [(0.44 + 0.38 * 0.22, 0.05), (0.905, 0.045), (0.265, 0.06)]
 
 
 def town_near(W, H, pw, ph, y_top0, seed=11):
@@ -693,7 +719,12 @@ def town_far(W, H, pw, ph, y_top0, seed=5):
     rooftop_sign(cv, bx0 + 0.38 * (bx1 - bx0), by, 0.065 * W, 0.03 * H, s, hk, 'コーポ青空')
     RD.flat_roof_kit(cv, bx0 + 0.52 * (bx1 - bx0), bx0 + 0.62 * (bx1 - bx0), by, s, hk, drng, fh)
     rooftop_sign(cv, ox + 0.905 * W, y_top0 + 0.742 * H, 0.06 * W, 0.026 * H, s, 0.6, 'さくら歯科')
-    rooftop_sign(cv, ox + 0.07 * W, y_top0 + 0.735 * H, 0.095 * W, 0.028 * H, s, 0.42, '田中クリーニング')
+    # (moved onto the (0.17-0.27) apartment roof: at the far left the near wires swept across it at the end
+    # of the crane and it smeared out; here it stays clear of every wire and reads as sharply as the others)
+    tx_, ty_ = ox + 0.265 * W, y_top0 + 0.745 * H
+    cv.lines([[(tx_ - 0.036 * W, ty_), (tx_ - 0.036 * W, y_top0 + 0.768 * H)],
+              [(tx_ + 0.036 * W, ty_), (tx_ + 0.036 * W, y_top0 + 0.768 * H)]], max(0.8, 1.2 * s), hz(_h('#3a4460'), 0.45))
+    rooftop_sign(cv, tx_, ty_, 0.09 * W, 0.027 * H, s, 0.4, '田中クリーニング')
     sx = bx0 + 0.08 * (bx1 - bx0)
     cv.poly([(sx - 0.025 * W, by), (sx + 0.025 * W, by), (sx + 0.025 * W, by - 0.05 * H), (sx - 0.025 * W, by - 0.05 * H)],
             hz(_h('#9aa2b8'), hk))

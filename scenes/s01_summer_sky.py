@@ -17,12 +17,13 @@ from lib import core as C, sky as S, fx as F, clouds2 as K  # noqa: E402
 import s01_summer_sky_hero as HR  # noqa: E402
 import s01_summer_sky_vol as CB  # noqa: E402  (clouds3 helpers for the family clouds)
 import s01_summer_sky_cbp as CBP  # noqa: E402  (family clouds + mackerel rows)
-import s01_summer_sky_paint7 as P6  # noqa: E402  (hero tower: painted mass hierarchy, round 13)
+import s01_summer_sky_paint8 as P8  # noqa: E402  (hero tower: nested fractal masses + anvil, round 14)
 import s01_summer_sky_city as T  # noqa: E402
 import s01_summer_sky_fx as X  # noqa: E402
 import s01_summer_sky_flare as FL  # noqa: E402
 
 DURATION = 5.5
+BASE_K = 0.085      # cloud base height above the horizon (fraction of H): leaves room for the rain veil
 
 SKY_PRESET = dict(stops=[(0.0, '#0a45b8'), (0.16, '#155dcd'), (0.34, '#2e80de'), (0.5, '#58a2e9'),
                          (0.64, '#8ec4f0'), (0.78, '#b8dcf6'), (0.9, '#d6ecf9'), (1.0, '#ebf8fc')],
@@ -90,11 +91,12 @@ def _vnoise1(n, seed, smooth=3.0):
 class Scene:
     def __init__(self, W, H):
         self.W, self.H = W, H
-        self.TR = 0.2 * H                  # foreground crane travel (px): slow, stately establishing move
+        self.TR = 0.1 * H                  # foreground crane travel (px): a gentle rise that keeps the roofs in frame
         self.PT = 0.46 * H                  # pole placement (pole top at ~0.12 H in the opening frame)
         self.mg = 0.03 * H
-        self.D_SKY = 0.8                  # sky + tower barely move: a crane-down reveal, not a pan
-        self.D_POLE = 1.45                 # near pole + wires sweep ~1.75x faster than the rooftops (parallax)
+        self.D_SKY = 0.22                  # sky + tower ~20 km away: ~0.2x the rooftop travel
+        self.D_FAR = 0.72                  # far roofs / signs / horizon haze
+        self.D_POLE = 1.6                  # near pole + wires sweep fastest (multi-plane parallax)
         self._build_sky(W, H)
         self._build_fg(W, H)
         xs, ys = C.grid(W, H)
@@ -109,15 +111,17 @@ class Scene:
         ox = (pw - W) / 2
         y_top0 = ph - mg - H                         # plate row at screen top at t=0
         y_top1 = mg                                  # ... at the end of the tilt
-        base_y = y_top1 + 0.845 * H                  # flat cloud base: just above the far roofs at the end
         self.hz_y = y_top0 + 0.8 * H                 # horizon
-        top_y = y_top1 + 0.15 * H                  # crown top at the end (headroom for the sun + rays)
+        base_y = self.hz_y - BASE_K * H              # flat dark base above the far roofs; a visible rain veil hangs below it
+        top_y = y_top0 + 0.035 * H                   # anvil top just inside the top of frame at the start
         self.base_y, self.top_y = base_y, top_y
-        x0 = ox + 0.38 * W                            # left of centre: cloud + pole form a thirds layout
-        Hc = (base_y - top_y) / 1.01
+        x0 = ox + 0.4 * W                             # left of centre: cloud + pole form a thirds layout
+        Hc = base_y - top_y
         self.Hc = Hc
-        rgba, self.sun_p = P6.hero(pw, ph, x0, base_y, Hc, W, self.hz_y, seed=4)
+        rgba, self.sun_p = P8.hero(pw, ph, x0, base_y, Hc, W, seed=4)
         self.tower = Plate(rgba, D, W, H, TR, mg)
+        # rain veil under the flat base: its own plate, drawn OVER the distance haze so it stays visible
+        self.veil = Plate(P8.LAST.pop('veil'), D, W, H, TR, mg)
         # slow internal boil: two smooth displacement fields tied to the tower plate (4 ch, px units),
         # stronger toward the growing crown; blended in quadrature over time (< 0.2 px / frame)
         rng_b = np.random.default_rng(17)
@@ -130,7 +134,7 @@ class Scene:
         fld = cv2.resize(fld, (pw // 4, ph // 4), interpolation=cv2.INTER_CUBIC)
         yy_ = (np.arange(ph // 4, dtype=np.float32) * 4)[:, None, None]
         topw = 0.45 + 0.55 * C.smoothstep(base_y, top_y, yy_)
-        self.boil_q = np.ascontiguousarray(fld * topw * (0.0035 * W), np.float32)   # quarter-res plate
+        self.boil_q = np.ascontiguousarray(fld * topw * (0.0012 * W), np.float32)   # quarter-res plate
         self.tower_axis = float(x0)
         # sky
         hzp = self.hz_y / ph
@@ -142,19 +146,18 @@ class Scene:
         self._build_family(W, H, pw, ph, ox, y_top0, y_top1)
         self.bank = Plate(self._stack(bank, self._humi), D, W, H, TR, mg)
         # soft fibrous cirrus streams in the open sky (x0, y0, length, angle, bend, half-width, opacity)
-        streams = [(ox + 0.62 * W, y_top1 + 0.13 * H, 0.5 * W, -9, 0.04, 0.02 * H, 0.55),
-                   (ox + 0.72 * W, y_top1 + 0.03 * H, 0.45 * W, -6, -0.03, 0.014 * H, 0.4),
-                   (ox - 0.12 * W, y_top1 + 0.12 * H, 0.42 * W, -14, 0.05, 0.022 * H, 0.45),
-                   (ox - 0.08 * W, y_top1 + 0.34 * H, 0.3 * W, -10, 0.03, 0.012 * H, 0.3),
-                   (ox + 0.66 * W, y_top0 + 0.05 * H, 0.5 * W, -7, 0.03, 0.018 * H, 0.35),
-                   (ox + 0.78 * W, y_top0 + 0.26 * H, 0.35 * W, -4, 0.02, 0.01 * H, 0.25),
+        streams = [(ox + 0.6 * W, y_top0 + 0.3 * H, 0.5 * W, -9, 0.04, 0.02 * H, 0.5),
+                   (ox + 0.8 * W, y_top0 + 0.0 * H, 0.4 * W, -6, -0.03, 0.014 * H, 0.35),
+                   (ox - 0.12 * W, y_top0 + 0.14 * H, 0.42 * W, -14, 0.05, 0.022 * H, 0.45),
+                   (ox - 0.08 * W, y_top0 + 0.38 * H, 0.3 * W, -10, 0.03, 0.012 * H, 0.3),
+                   (ox + 0.7 * W, y_top0 + 0.44 * H, 0.35 * W, -4, 0.02, 0.01 * H, 0.25),
                    (ox - 0.1 * W, y_top0 + 0.02 * H, 0.3 * W, -12, 0.04, 0.012 * H, 0.25)]
         cir = X.cirrus_soft(pw, ph, W, streams, seed=6, sun=self.sun_p)
         cir = self._stack(self._alt, cir)
         self.cirrus = Plate(cir, D * 0.97, W, H, TR, mg)
         # contrail path (plate coords): plane flies from the right edge up-left toward the crown
-        self.tr_a = np.array([ox + 1.2 * W, y_top1 + 0.44 * H])
-        self.tr_b = np.array([ox + 0.62 * W, y_top1 + 0.09 * H])
+        self.tr_a = np.array([ox + 1.2 * W, y_top0 + 0.46 * H])
+        self.tr_b = np.array([ox + 0.66 * W, y_top0 + 0.24 * H])
         self.tr_noise = _vnoise1(2048, 5, 80.0)
         self.tr_noise2 = _vnoise1(2048, 9, 60.0)
         self.bird_col = np.array([0.16, 0.2, 0.36], np.float32)
@@ -169,12 +172,14 @@ class Scene:
         sd = (-0.85, -0.5)
         pk = dict(ramp='s01', k_sun=0.6, crisp=(0.3, 0.5), lost=(0.0, 0.9), tint_var=0.3, strokes=0.012, kuwa=4)
         # mid-distance cumulus at the left / right edges (tops caught by the tilt)
-        mid = CBP.family_plate(pw, ph, [
-            dict(cx=ox + 1.0 * W, base_y=hz - 0.27 * H, width=0.2 * W, height=0.12 * H, seed=13, haze=0.3),
-            dict(cx=ox + 0.87 * W, base_y=hz - 0.17 * H, width=0.1 * W, height=0.055 * H, seed=14, haze=0.4),
-            dict(cx=ox + 0.14 * W, base_y=hz - 0.08 * H, width=0.1 * W, height=0.05 * H, seed=12, haze=0.42),
-            dict(cx=ox + 0.0 * W, base_y=hz - 0.13 * H, width=0.22 * W, height=0.14 * H, seed=11, haze=0.25)],
-            self.sun_p, haze_col=(0.78, 0.87, 0.97))
+        # (same painter as the hero tower -> one brush for every cumulus in the shot; hazier the lower /
+        # farther they sit)
+        mid = np.zeros((ph, pw, 4), np.float32)
+        for (cxf, byf, hcf, sd_, hz_) in ((0.98, 0.24, 0.12, 13, 0.3), (0.845, 0.145, 0.06, 14, 0.42),
+                                          (0.02, 0.12, 0.13, 11, 0.3), (0.175, 0.065, 0.05, 12, 0.46)):
+            cu = P8.cumulus(pw, ph, ox + cxf * W, hz - byf * H, hcf * H, W, seed=sd_, haze=hz_,
+                            haze_col=(0.8, 0.88, 0.97))
+            mid = self._stack(mid, cu)
         self.mid = Plate(mid, D * 0.97, W, H, TR, mg)
         # cumulus humilis: small flat heaps just above the far roofs, hazier with distance
         hum = []
@@ -193,8 +198,9 @@ class Scene:
         # aerial-perspective distance band between the flat cloud base and the (hidden) horizon: the foot
         # of the tower sinks into a pale haze, so the cloud reads as kilometres away behind the town
         yy = np.arange(ph, dtype=np.float32)[:, None]
-        by = self.base_y
-        ah = 0.6 * C.smoothstep(by - 0.07 * H, by + 0.015 * H, yy) + 0.3 * C.smoothstep(by, hz, yy)
+        by = min(self.base_y, hz - 0.012 * H)
+        # haze starts BELOW the flat base (the base stays a readable dark plane) and thickens to the horizon
+        ah = 0.25 * C.smoothstep(by - 0.01 * H, by + 0.03 * H, yy) + 0.45 * C.smoothstep(by + 0.01 * H, hz, yy)
         dh = np.zeros((ph, pw, 4), np.float32)
         dh[..., :3] = (np.array([0.8, 0.88, 0.97], np.float32) * (1 - C.smoothstep(by - 0.05 * H, hz, yy))[..., None]
                        + np.array([0.9, 0.95, 0.99], np.float32) * C.smoothstep(by - 0.05 * H, hz, yy)[..., None])
@@ -224,7 +230,7 @@ class Scene:
         pn = cv2.resize(pn, (pw, ph), interpolation=cv2.INTER_LINEAR)
         keep = keep * C.smoothstep(-0.35, 0.25, pn)
         tw_ = np.sqrt(((xx_ - self.tower_axis - 0.05 * W) / (0.3 * W)) ** 2 + ((yy_ - y_top1 - 0.35 * H) / (0.5 * H)) ** 2)
-        keep = keep * C.smoothstep(0.85, 1.2, tw_)
+        keep = keep * C.smoothstep(0.85, 1.2, tw_) * C.smoothstep(y_top0 + 0.15 * H, y_top0 + 0.26 * H, yy_)
         alt = CB.KK.sky_rows_plate(pw, ph, self.hz_y, seed=5, fov=60.0, alt=3.0, angle=28.0, cell=0.07,
                                    cover=0.45, patch=3.0, patch_thr=-0.15, warp=0.8, region=(0.0, 0.9),
                                    lit=(1.02, 1.0, 0.95), body=(0.82, 0.89, 0.98), under=(0.6, 0.72, 0.92),
@@ -235,16 +241,21 @@ class Scene:
     # ------------------------------------------------------------------ foreground
     def _build_fg(self, W, H):
         TR, mg = self.TR, self.mg
-        fw, fh = Plate.size(W, H, 0.9, TR, mg)
+        fw, fh = Plate.size(W, H, self.D_FAR, TR, mg)
         T.GLINTS.clear()
+        T.SIGNS.clear()
         far, _ = T.town_far(W, H, fw, fh, fh - mg - H)
+        far = self._paint_town(far, list(T.SIGNS), far=True)
+        T.SIGNS.clear()
         self.far_glints = list(T.GLINTS)
         T.GLINTS.clear()
         self._gy_far = int(fh - mg - H + 0.5 * H)
         far = self._grade_town(far, far=True)
-        self.town_far = Plate(self._full(far, fh, fh - mg - H + 0.5 * H), 0.9, W, H, TR, mg)
+        self.town_far = Plate(self._full(far, fh, fh - mg - H + 0.5 * H), self.D_FAR, W, H, TR, mg)
         nw, nh = Plate.size(W, H, 1.0, TR, mg)
         near, _ = T.town_near(W, H, nw, nh, nh - mg - H)
+        near = self._paint_town(near, list(T.SIGNS), far=False)
+        T.SIGNS.clear()
         self.near_glints = list(T.GLINTS)
         T.GLINTS.clear()
         self._gy_near = int(nh - mg - H + 0.5 * H)
@@ -252,12 +263,12 @@ class Scene:
         self.town_near = Plate(self._full(near, nh, nh - mg - H + 0.5 * H), 1.0, W, H, TR, mg)
         qw, qh = Plate.size(W, H, self.D_POLE, TR, mg)
         ox = (qw - W) / 2
-        pole, wires = T.pole_and_wires(W, H, qw, qh, qh - mg - H, self.PT, sun_x=ox + 0.47 * W)
+        sun_x = ox + float(self.sun_p[0]) - (self.pw - W) / 2
+        pole, wires = T.pole_and_wires(W, H, qw, qh, qh - mg - H, self.PT, sun_x=sun_x)
         self.pole = Plate(pole, self.D_POLE, W, H, TR, mg)
         # specular glint points (pole-plate coords): where each wire crosses the sun's azimuth band, the
         # insulator tops and the transformer lid
         # specular glints: only where the top wires cross the sun's azimuth (2-3 small points)
-        sun_x = ox + 0.47 * W
         gp = []
         for i, (pts, wd) in enumerate(wires):
             if len(pts) < 20 or len(gp) >= 3 or i % 2:
@@ -274,7 +285,58 @@ class Scene:
         a = np.exp(-((yy - yb) / (0.035 * H)) ** 2) * 0.55 + C.smoothstep(yb - 0.02 * H, yb + 0.08 * H, yy) * 0.25
         hh[..., :3] = np.array([0.88, 0.96, 1.0], np.float32)
         hh[..., 3] = np.broadcast_to(a, (fh, fw))
-        self.haze_band = Plate(hh, 0.9, W, H, TR, mg)
+        self.haze_band = Plate(hh, self.D_FAR, W, H, TR, mg)
+
+    def _paint_town(self, rgba, signs, far):
+        """Painted pass over the rooftop band: (1) inside every flat vertical run (walls, panels, slabs) a
+        warm top -> cool bottom gradient, (2) broad value mottling + fine brush tooth so no fill is a clean
+        vector flat, (3) thin dark outlines are lost (mostly on the shaded planes) - signs are kept sharp."""
+        W = self.W
+        s = W / 1920.0
+        c = rgba[..., :3].astype(np.float32).copy()
+        a = rgba[..., 3]
+        h, w = a.shape
+        lum = c @ np.array([0.3, 0.59, 0.11], np.float32)
+        smask = np.zeros((h, w), np.float32)
+        for (x0, y0, x1, y1) in signs:
+            x0, y0, x1, y1 = int(max(x0, 0)), int(max(y0, 0)), int(min(x1, w)), int(min(y1, h))
+            if x1 > x0 and y1 > y0:
+                smask[y0:y1, x0:x1] = 1.0
+        smask = cv2.GaussianBlur(smask, (0, 0), 1.5)
+        keep = 1 - np.clip(smask * 1.5, 0, 1)
+        # (1) vertical runs between horizontal edges
+        lb = cv2.GaussianBlur(lum, (0, 0), 0.7)
+        E = (np.abs(cv2.Sobel(lb, cv2.CV_32F, 0, 1, ksize=3)) > 0.12) | (a < 0.5)
+        idx = np.arange(h, dtype=np.int32)[:, None]
+        last = np.maximum.accumulate(np.where(E, idx, -1), axis=0)
+        nxt = np.minimum.accumulate(np.where(E, idx, h)[::-1], axis=0)[::-1]
+        seg = (nxt - last).astype(np.float32)
+        v = np.clip((idx - last) / np.maximum(seg, 1), 0, 1)
+        wk = C.smoothstep(4 * s, 14 * s, seg) * (a > 0.5)
+        g = (0.5 - v) * wk
+        c = c * (1 + g[..., None] * np.array([0.17, 0.07, -0.1], np.float32) * (1.0 if not far else 0.6))
+        # (2) broad mottling + a fine directional tooth
+        rng = np.random.default_rng(31 if far else 32)
+        mot = cv2.GaussianBlur(rng.standard_normal((h, w)).astype(np.float32), (0, 0), 14 * s)
+        mot /= mot.std() + 1e-6
+        tooth = cv2.GaussianBlur(rng.standard_normal((h, w)).astype(np.float32), (0, 0), sigmaX=1.6 * s + 0.3, sigmaY=0.5)
+        tooth /= tooth.std() + 1e-6
+        flat = C.smoothstep(0.05, 0.01, np.abs(cv2.Laplacian(lb, cv2.CV_32F, ksize=3)))
+        amp = (0.05 if not far else 0.03) * mot + 0.015 * tooth * flat
+        c = c * (1 + (amp * keep)[..., None] * np.array([1.0, 0.97, 0.9], np.float32))
+        # (3) lose thin dark outlines: morphological closing removes 1-2 px dark lines
+        kz = 3 if far or s < 0.75 else 5
+        ker = np.ones((kz, kz), np.uint8)
+        cl = cv2.morphologyEx(c, cv2.MORPH_CLOSE, ker)
+        lcl = cl @ np.array([0.3, 0.59, 0.11], np.float32)
+        lum2 = c @ np.array([0.3, 0.59, 0.11], np.float32)
+        thin = np.clip((lcl - lum2 - 0.04) * 6, 0, 1)
+        shade = C.smoothstep(0.55, 0.3, cv2.GaussianBlur(lcl, (0, 0), 3 * s))
+        k = thin * (0.3 + 0.5 * shade) * keep * (a > 0.5)
+        c = c + (cl - c) * k[..., None]
+        out = rgba.copy()
+        out[..., :3] = c
+        return out
 
     def _grade_town(self, rgba, far):
         """Colour pass on the rooftop band (backlit summer noon): warm sunlit tops / ridges, cool
@@ -346,8 +408,13 @@ class Scene:
     def cam(self, t):
         # a clear ease-in / ease-out crane (smootherstep: zero velocity AND acceleration at both ends),
         # settling on the tower just before the cut
-        s = min(max((t - self.T0) / (DURATION - 0.25 - self.T0), 0.0), 1.0)
-        u = s * s * s * (s * (6 * s - 15) + 10)
+        s = min(max((t - self.T0) / (DURATION - self.T0), 0.0), 1.0)
+        # mostly a smootherstep crane, blended with an ease-in-only ramp so a slow drift carries right
+        # through the cut (no dead hold on the last frames)
+        # (half smootherstep, half a long sine ease-in whose velocity peaks late: one continuous C1 ease,
+        # still ~45 % of peak speed at the 5.0 s cut, so the shot never lands on a hold)
+        g = (1 - math.cos(0.7 * math.pi * s)) / (1 - math.cos(0.7 * math.pi))
+        u = 0.5 * (s * s * s * (s * (6 * s - 15) + 10)) + 0.5 * g
         zoom = 1.0 + 0.03 * u
         return u, zoom
 
@@ -421,8 +488,8 @@ class Scene:
         wingbeat (phase/rate) and a slow glide modulation; drawn supersampled in small boxes."""
         W, H = self.W, self.H
         # loose formation in the open sky right of the anvil tip, gliding right and climbing slowly
-        cxp = self.pw / 2 + 0.24 * W + 0.02 * W * t
-        cyp = self.hz_y - 0.8 * H - 0.02 * H * t
+        cxp = self.pw / 2 + 0.2 * W + 0.02 * W * t
+        cyp = self.hz_y - 0.52 * H - 0.02 * H * t
         for i, (ox_, oy_, sc, ph, fr) in enumerate(self.BIRDS):
             wob = math.sin(t * 0.9 + ph) * 0.004 * W
             p = self.sky.to_screen((cxp + ox_ * W, cyp + oy_ * W + wob), u, zoom, dx)
@@ -487,7 +554,7 @@ class Scene:
         o = cv2.resize(occ, (ww, hh), interpolation=cv2.INTER_AREA)
         pat = pat * (1 - np.clip(C.blur(o, 0.01 * ww) * 1.3, 0, 1))
         out = cv2.resize(C.blur(pat.astype(np.float32), 1.0), (w, h), interpolation=cv2.INTER_LINEAR)
-        return out[..., None] * np.array([1.0, 0.96, 0.86], np.float32) * 0.3
+        return out[..., None] * np.array([1.0, 0.9, 0.72], np.float32) * 0.3
 
     def _glint(self, img, x, y, L, inten, color=(1.0, 0.95, 0.82)):
         W, H = self.W, self.H
@@ -528,9 +595,16 @@ class Scene:
         img = F.over_rgba(img, self.dist_haze.render(u, zoom))
         img = self._birds(img, u, zoom, t, drift * 0.8)
         # foreground (skipped once it has left the frame)
+        fga = np.zeros((H, W), np.float32)
         for P in (self.haze_band, self.town_far, self.town_near, self.pole):
             if P.on_screen(u, zoom):
-                img = F.over_rgba(img, P.render(u, zoom))
+                r_ = P.render(u, zoom)
+                img = F.over_rgba(img, r_)
+                if P is self.haze_band:
+                    # the rain veil reads through the horizon haze (it carries its own aerial fade)
+                    img = F.over_rgba(img, self.veil.render(u, zoom, dx=drift))
+                if P is not self.haze_band:
+                    fga = fga + r_[..., 3] * (1 - fga)
         # specular glints on solar panels / window glass / heater tanks (twinkling, only a few at a time)
         for P, gl, gy0 in ((self.town_far, self.far_glints, self._gy_far), (self.town_near, self.near_glints, self._gy_near)):
             if not P.on_screen(u, zoom):
@@ -589,16 +663,17 @@ class Scene:
         # bloom over the crown (the hero light reads as a backlit glow through the top of the tower)
         acc += (np.exp(-d / 0.05) * 0.035 * occs)[..., None] * np.array([1.0, 0.96, 0.88], np.float32)
         acc += ((np.exp(-d / 0.02) * 0.07 + np.exp(-d / 0.08) * 0.012) * occs)[..., None] *             np.array([1.0, 0.9, 0.74], np.float32)
-        acc_fl = F.anime_flare(w2, h2, lx / 2, ly / 2, intensity=0.42 * (0.4 + 0.6 * sun_in), tint=(1.0, 0.94, 0.84), rays=6, ray_len=0.05,
+        acc_fl = F.anime_flare(w2, h2, lx / 2, ly / 2, intensity=0.33 * (0.4 + 0.6 * sun_in), tint=(1.0, 0.9, 0.74), rays=6, ray_len=0.05,
                              starburst=0.45, ghosts=0.0, halo=0.0, streak=1.0, glow=0.15, rot=0.01 * t)
         if sun_in > 0.01:
             # ghost chain along the sun -> optical-centre axis (slides as the camera tilts) + anamorphic streak
             acc_fl = acc_fl + FL.ghost_chain(w2, h2, lx / 2, ly / 2, (0.66 * W + 0.03 * W * (u - 0.5)) / 2, 0.52 * H / 2,
                                   amt=1.0 * sun_in * (0.55 + 0.45 * self._sun_vis))
-            acc += FL.anamorphic(w2, h2, lx / 2, ly / 2, cx=(0.5 + 0.04 * (u - 0.5)) * W / 2, amt=0.9 * sun_in * (0.4 + 0.6 * self._sun_vis), xs=xq / 2, ys=yq / 2)
+            acc_fl = acc_fl + FL.anamorphic(w2, h2, lx / 2, ly / 2, cx=(0.5 + 0.04 * (u - 0.5)) * W / 2, amt=0.6 * sun_in * (0.4 + 0.6 * self._sun_vis), xs=xq / 2, ys=yq / 2)
         img = img + cv2.resize(acc.astype(np.float32), (W, H), interpolation=cv2.INTER_LINEAR)
         occf = np.clip(occ * 1.1, 0, 1)[..., None]
-        img = img + cv2.resize(acc_sky.astype(np.float32), (W, H), interpolation=cv2.INTER_LINEAR) * (1 - occf) ** 2
+        # sky light (glow, rays) stays in the sky: the town / signs / pole in front keep their contrast
+        img = img + cv2.resize(acc_sky.astype(np.float32), (W, H), interpolation=cv2.INTER_LINEAR) *             ((1 - occf) ** 2 * (1 - 0.85 * fga[..., None]))
         img = img + cv2.resize(acc_fl.astype(np.float32), (W, H), interpolation=cv2.INTER_LINEAR) * (1 - 0.85 * occf)
         img = F.shoulder(img, 0.96, desat=0.04)
         # paper tooth: subtle everywhere, halved again on the cloud paint

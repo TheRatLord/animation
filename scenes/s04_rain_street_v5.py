@@ -54,11 +54,16 @@ def wobble(sc, t, dZ):
         ph1 = cv2.resize(ph1, (W2, H2), interpolation=cv2.INTER_CUBIC)
         ph2 = A.noise(max(W2 // 8, 8), max(H2 // 8, 8), 7, 5152, 3)
         ph2 = cv2.resize(ph2, (W2, H2), interpolation=cv2.INTER_CUBIC)
-        sc._wv = (Zr[:, None], amp[:, None], (ph1 * 7.0).astype(np.float32), (ph2 * 9.0).astype(np.float32))
-    Zr, amp, p1, p2 = sc._wv
+        ph3 = A.noise(max(W2 // 4, 8), max(H2 // 16, 8), 11, 5153, 3)
+        ph3 = cv2.resize(ph3, (W2, H2), interpolation=cv2.INTER_CUBIC)
+        sc._wv = (Zr[:, None], amp[:, None], (ph1 * 7.0).astype(np.float32), (ph2 * 9.0).astype(np.float32),
+                  (ph3 * 12.0).astype(np.float32))
+    Zr, amp, p1, p2, p3 = sc._wv
     Zw = Zr + np.float32(dZ)
     w = (np.sin(Zw * np.float32(2 * np.pi / 0.85) + np.float32(2.4 * t) + p1) * np.float32(0.65) +
-         np.sin(Zw * np.float32(2 * np.pi / 0.33) + np.float32(3.7 * t) + p2) * np.float32(0.35))
+         np.sin(Zw * np.float32(2 * np.pi / 0.33) + np.float32(3.7 * t) + p2) * np.float32(0.35) +
+         # fine horizontal ripple shimmer (short wavelength rows, rolling toward the camera)
+         np.sin(Zw * np.float32(2 * np.pi / 0.09) + np.float32(6.0 * t) + p3) * np.float32(0.55))
     return (w * amp).astype(np.float32)
 
 
@@ -216,7 +221,21 @@ def drugstore(As, Es, rng, ww, hh, fas, P):
     cond = np.clip((ys - (H_ - P(0.8))) / P(0.8), 0, 1) ** 1.2
     inter = inter * (1 - 0.35 * cond[..., None]) + hexc('#e8f0ff') * (0.5 * cond)[..., None]
     sub = (slice(int(gy0), int(gy0) + H_), slice(int(gx0), int(gx0) + W_))
-    Es[sub] = Es[sub] + inter * 0.38
+    Es[sub] = Es[sub] + inter * 0.3
+    # lightbox fascia: uneven tube hot-spots, rain run-off from the top edge and grime (painted, not a clean
+    # CG white plane)
+    fy = np.arange(int(fas) + 1, dtype=np.float32)[:, None] / max(fas, 1)
+    fx = np.arange(ww, dtype=np.float32)[None, :]
+    nt = max(2, int(ww / max(P(1.2), 1)))
+    tubes = 0.72 + 0.28 * (0.5 + 0.5 * np.cos(fx / max(ww / nt, 1) * 2 * np.pi)) * np.exp(-((fy - 0.45) / 0.5) ** 2)
+    cn = A.noise(max(ww // 3, 4), 6, max(4, int(ww / max(P(0.35), 1))), int(rng.integers(1e9)), 3)
+    cn = cv2.resize(cn, (ww, int(fas) + 1), interpolation=cv2.INTER_CUBIC)
+    runs = np.clip((cn - 0.5) * 3.5, 0, 1) * np.clip(1.1 - fy * 0.9, 0, 1)
+    bl = A.noise(ww, int(fas) + 1, max(4, ww // 40), int(rng.integers(1e9)), 3)
+    dirt = (0.82 + 0.3 * bl) * (1 - 0.45 * runs)
+    k = (tubes * dirt)[..., None].astype(np.float32)
+    Es[:int(fas) + 1] *= k * 0.8
+    As[:int(fas) + 1] *= (0.75 + 0.25 * dirt)[..., None]
     As[sub] = inter * 0.05
     A.rect(As, 0, hh - P(0.3), ww, hh, hexc('#1e2026'))
 
@@ -464,7 +483,7 @@ def mist(sc, img, t):
     fr = np.float32(off - o)
     d = den[:, o:o + W] * (1 - fr) + den[:, o + 1:o + 1 + W] * fr
     a = (d * env * 0.5)[..., None]
-    col = np.float32([0.62, 0.52, 0.82])
+    col = np.float32([0.52, 0.60, 0.60])
     img[:] = img * (1 - a * 0.55) + col * a
 
 

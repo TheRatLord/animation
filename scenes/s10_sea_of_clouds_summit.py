@@ -27,6 +27,11 @@ def ss(e0, e1, x):
     return t * t * (3 - 2 * t)
 
 
+def ss_py(e0, e1, x):
+    t = min(max((x - e0) / (e1 - e0), 0.0), 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
 def fbm(w, h, cells, seed, octaves=4, stretch=1.0, angle=0.0):
     from lib import clouds3 as K
     return K._noise(w, h, cells, seed, octaves, stretch, angle)
@@ -421,7 +426,7 @@ class Summit:
         xs = np.arange(PW, dtype=np.float64)
         fx = (xs - self.ox) / self.W
         kx = [-0.2, 0.0, 0.12, 0.3, 0.42, 0.52, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2]
-        ky = [0.70, 0.705, 0.715, 0.73, 0.76, 0.81, 0.855, 0.875, 0.845, 0.80, 0.775, 0.76]
+        ky = [0.735, 0.74, 0.75, 0.765, 0.795, 0.845, 0.89, 0.905, 0.875, 0.835, 0.81, 0.795]
         base = np.interp(fx, kx, ky)
         g = self.oy + base * self.H + 7 * sc * frac1d(PW, self.seed + 1, 6, 10, 0.55) + \
             2.5 * sc * frac1d(PW, self.seed + 2, 4, 160, 0.5)
@@ -434,7 +439,7 @@ class Summit:
         xs = np.arange(PW, dtype=np.float64)
         fx = (xs - self.ox) / self.W
         kx = [-0.3, -0.05, 0.1, 0.22, 0.34, 0.46, 0.58, 0.7, 0.8, 0.9, 1.0, 1.3]
-        ky = [0.83, 0.835, 0.85, 0.875, 0.9, 0.915, 0.93, 0.935, 0.925, 0.905, 0.885, 0.87]
+        ky = [0.875, 0.88, 0.895, 0.915, 0.94, 0.955, 0.965, 0.97, 0.96, 0.945, 0.925, 0.91]
         base = np.interp(fx, kx, ky)
         g = self.oy + base * self.H + 6 * sc * frac1d(PW, self.seed + 5, 6, 8, 0.55) + \
             2.0 * sc * frac1d(PW, self.seed + 6, 4, 120, 0.5)
@@ -443,7 +448,8 @@ class Summit:
     # ------------------------------------------------------------------------------------------ rocks
     def rock_shapes(self):
         R = []
-        spec = [(0.03, 0.042, 0.03), (0.155, 0.022, 0.018), (0.46, 0.03, 0.02), (0.885, 0.04, 0.028)]
+        spec = [(0.03, 0.05, 0.034), (0.155, 0.022, 0.018), (0.46, 0.036, 0.024), (0.885, 0.04, 0.028),
+                (0.6, 0.03, 0.022)]
         for i, (fx, rx, ry) in enumerate(spec):
             x = self.ox + fx * self.W
             gi = int(np.clip(x, 0, self.PW - 1))
@@ -453,9 +459,10 @@ class Summit:
 
     def rock_mask(self, cx, cy, rx, ry, seed):
         rng = np.random.default_rng(seed)
-        n = int(rng.integers(9, 13))
-        ang = np.sort(np.linspace(0, 2 * math.pi, n, endpoint=False) + rng.uniform(-0.2, 0.2, n))
-        r = 1 + 0.16 * rng.uniform(-1, 1, n)
+        n = int(rng.integers(26, 34))
+        ang = np.sort(np.linspace(0, 2 * math.pi, n, endpoint=False) + rng.uniform(-0.06, 0.06, n))
+        # weathered boulder: a broad rounded mass with small chips (no low-poly facets)
+        r = 1 + 0.07 * np.sin(ang * 2 + rng.uniform(0, 6)) + 0.05 * rng.uniform(-1, 1, n)
         pts = []
         for a, rr in zip(ang, r):
             y = math.sin(a)
@@ -479,16 +486,81 @@ class Summit:
         #  * a nearer mound in front, a step darker, with its own crisp edge and grass fringe
         n1 = fbm(PW, PH, max(PW / (200 * sc), 3), 31, 3, stretch=3.0, angle=-4)
         # back ridge: a readable lifted cool value (sky light on the far slope), clearly above the near mound
-        back_top = np.array([0.07, 0.056, 0.115], F32)
-        back_low = np.array([0.036, 0.03, 0.062], F32)
-        k = (0.6 * np.exp(-din / 0.05) + 0.4 * np.exp(-din / 0.25))[..., None]
+        # (crushed: a near-black violet backlit silhouette, value < 20 once graded)
+        back_top = np.array([0.04, 0.03, 0.058], F32)
+        back_low = np.array([0.014, 0.011, 0.024], F32)
+        k = (0.6 * np.exp(-din / 0.06) + 0.4 * np.exp(-din / 0.3))[..., None]
         col = back_low + (back_top - back_low) * k
-        col = col * (1 + 0.05 * n1[..., None])
+        col = col * (1 + 0.06 * n1[..., None])
+        # warm backlit crest: the grass along the ridge line glows with the low sun (translucent turf),
+        # strongest toward the sun column, a lost soft falloff down the slope
+        dxs_ = (xx - sx) / self.W
+        sunw_ = 0.3 + 0.7 * np.exp(-(dxs_ / 0.35) ** 2)
+        crest = ((0.75 * np.exp(-din / 0.012) + 0.25 * np.exp(-din / 0.045)) * (0.75 + 0.25 * ss(-0.3, 0.3, n1)) * sunw_)[..., None]
+        col = col + (np.array([0.26, 0.11, 0.06], F32) - col) * (0.55 * crest)
+        # painterly brush strokes laid along the slope (value + hue breaks, not noise mush)
+        stk = fbm(PW, PH, max(PW / (70 * sc), 3), 38, 3, stretch=7.0, angle=-6)
+        stk2 = fbm(PW, PH, max(PW / (22 * sc), 3), 39, 2, stretch=5.0, angle=-8)
+        sv = ss(0.05, 0.25, stk + 0.3 * stk2) - 0.6 * ss(0.1, 0.3, -stk - 0.3 * stk2)
+        col = col * (1 + 0.1 * sv[..., None])
+        # broad painted value masses: sky-lit slope planes (cool bounce) with crisp brushed borders, and
+        # darker hollows between them, fading with depth down the slope
+        n_lo = fbm(PW, PH, max(PW / (380 * sc), 3), 35, 3, stretch=3.0, angle=-5)
+        n_md = fbm(PW, PH, max(PW / (90 * sc), 3), 36, 3, stretch=2.2, angle=-5)
+        pl_ = ss(0.02, 0.07, n_lo + 0.22 * n_md) * ss(0.004, 0.03, din / 4.0)
+        hol = ss(0.08, 0.14, -n_lo + 0.2 * n_md)
+        bounce = np.array([0.05, 0.042, 0.085], F32)        # cool sky bounce on the slope planes
+        col = col + (bounce - col) * (pl_ * (0.3 - 0.2 * din))[..., None]
+        col = col * (1 - 0.3 * hol * ss(0.0, 0.1, din))[..., None]
+        # painted turf: thousands of small grass-tuft strokes (sky-lit cool tips / dark roots) laid into
+        # the whole slope, growing toward the camera, warm-tinted near the backlit crest
+        self.turf_l, self.turf_d = self._turf(gy)
+        tl, td = self.turf_l, self.turf_d
+        warm_t = (np.exp(-din / 0.08) * sunw_)[..., None]
+        lcol = np.array([0.13, 0.12, 0.23], F32) * (1 - warm_t) + np.array([0.34, 0.16, 0.09], F32) * warm_t
+        # (only near the crest: down the slope the silhouette stays one clean near-black mass, no speckle)
+        col = col + (lcol - col) * (tl * 0.4 * np.exp(-din / 0.05))[..., None]
+        col = col * (1 - 0.2 * td)[..., None]
+        # broad painted value shapes down the slope (the lower ~150 px of the frame): a few flat,
+        # half-buried rock slabs whose up-facing top planes catch a faint cool sky fill (hard ragged upper
+        # border, lost below), and grass tufts whose tips pick up the same cool fill - so the foot of the
+        # frame is not a dead black slab
+        rgm = np.random.default_rng(self.seed + 313)
+        Rk = np.zeros((PH, PW), F32)
+        Rt = np.zeros((PH, PW), F32)
+        for i in range(9):
+            cxr = self.ox + (i + rgm.uniform(0.1, 0.9)) / 9 * 1.1 * self.W - 0.05 * self.W
+            ci = int(np.clip(cxr, 0, PW - 1))
+            cyr = float(gy[ci]) + rgm.uniform(0.07, 0.2) * self.H
+            rxr = rgm.uniform(0.035, 0.085) * self.W
+            ryr = rxr * rgm.uniform(0.2, 0.3)
+            angs = np.linspace(math.pi, 2 * math.pi, 11)
+            pts = [(cxr + math.cos(a_) * rxr * rgm.uniform(0.9, 1.05),
+                    cyr + math.sin(a_) * ryr * rgm.uniform(0.75, 1.05) * (0.55 if abs(math.sin(a_)) > 0.5 else 1.0))
+                   for a_ in angs]
+            pts = pts + [(cxr + rxr, cyr + ryr * 2.5), (cxr - rxr, cyr + ryr * 2.5)]
+            mk = poly_mask(PW, PH, pts)
+            Rk = np.maximum(Rk, mk)
+            top_y = cyr - ryr * 0.45
+            wob_ = fbm(PW, PH, max(PW / (40 * sc), 3), 320 + i, 2)
+            tp_ = ss(top_y + 0.35 * ryr + 0.25 * ryr * wob_, top_y + 0.2 * ryr + 0.25 * ryr * wob_, yy) * mk
+            Rt = np.maximum(Rt, tp_)
+        cool_fill = np.array([0.085, 0.08, 0.15], F32)
+        low = (ss(0.12, 0.3, din) * (1 - 0.5 * ss(0.8, 1.2, din)))[..., None]
+        col = col * (1 - 0.3 * (Rk - Rt)[..., None] * low) + cool_fill * (Rt * 0.36)[..., None] * low
+        tlf = cv2.GaussianBlur(self.turf_l, (0, 0), 0.5 * sc) * (1 - Rk)
+        col = col + cool_fill * (tlf * 0.5)[..., None] * low
+        # faint bluish aerial haze on the far slope only
+        col = col + np.array([0.004, 0.005, 0.012], F32) * np.exp(-din / 0.1)[..., None]
         over(S, col.astype(F32), gm)
         self.gy2 = self.mound_line()
-        mm = cv2.GaussianBlur((yy >= self.gy2[None, :]).astype(F32), (0, 0), 0.03 * self.H)
+        mm = cv2.GaussianBlur((yy >= self.gy2[None, :]).astype(F32), (0, 0), 0.7 * sc)
         dm = np.clip((yy - self.gy2[None, :]) / (0.2 * self.H), 0, 1)
-        mcol = np.array([0.011, 0.0095, 0.017], F32) * (1 + 0.5 * np.exp(-dm / 0.04))[..., None] * (1 - 0.3 * dm[..., None])
+        nmm = fbm(PW, PH, max(PW / (150 * sc), 3), 37, 3, stretch=2.5)
+        mcol = np.array([0.013, 0.01, 0.022], F32) * (1 + 0.8 * np.exp(-dm / 0.04) * (0.8 + 0.4 * ss(-0.3, 0.3, nmm)))[..., None] * (1 - 0.3 * dm[..., None])
+        mcol = mcol + np.array([0.008, 0.007, 0.016], F32) * (ss(0.05, 0.12, nmm) * np.exp(-dm / 0.25))[..., None]
+        mcol = mcol * (1 + 0.06 * sv[..., None])
+        mcol = mcol + cool_fill * (tlf * 0.5)[..., None] * ss(0.03, 0.15, dm)[..., None]
         self.mound = mm
         self.ground_up = gm * 0
         self.extra_rim = np.zeros((PH, PW, 3), F32)
@@ -518,7 +590,7 @@ class Summit:
         g_s = (0.55 + 0.8 * prox)
         pa = np.clip(self._pine_A + D[..., 3] * self.pine_pads, 0, 1)
         pp = np.maximum(self.pine_pads, cv2.dilate(pa, np.ones((int(9 * sc) | 1, int(9 * sc) | 1), np.uint8)))
-        tm = self.own_rim_mask          # parts that paint their own rim (torii, signpost, rocks)
+        tm = np.maximum(self.own_rim_mask, self.pine_own)   # parts that paint their own rim (torii, signpost, rocks, pine)
         up_w = 0.35 * (1 - pp) * (1 - tm)
         # pine pads: the lining only on the edges truly facing the sun (no sky-up bias)
         r_p = rim_normal(Au, sx - 0.4 * self.W, sy - 0.9 * self.H, 1.1 * sc, soft=0.35 * sc, macro=2.5 * sc, power=1.8, bias=0.4)
@@ -544,6 +616,45 @@ class Summit:
         return S, D, Wt, Rs, Rd
 
     # ----------------------------------------------------------------------------------------- painters
+    def _turf(self, gy):
+        """Grass-tuft brush texture for the ground planes: returns (light strokes, dark strokes) in 0..1."""
+        PW, PH, sc, H = self.PW, self.PH, self.sc, self.H
+        rng = np.random.default_rng(self.seed + 901)
+        ssf = 2
+        L = np.zeros((PH * ssf, PW * ssf), np.uint8)
+        Dk = np.zeros((PH * ssf, PW * ssf), np.uint8)
+        gmin = float(gy.min())
+        n = int(26000 * (PW * PH) / (2342 * 1318))
+        xs = rng.uniform(0, PW, n)
+        ys = rng.uniform(gmin, PH + 10 * sc, n)
+        cl = fbm(PW, PH, max(PW / (60 * sc), 3), self.seed + 902, 3)
+        for x, y in zip(xs, ys):
+            xi = int(min(max(x, 0), PW - 1))
+            yi = int(min(max(y, 0), PH - 1))
+            g0 = float(gy[xi])
+            if y < g0 + 4 * sc:
+                continue
+            d = (y - g0) / (0.3 * H)
+            if cl[yi, xi] < -0.45 + 0.6 * rng.random():
+                continue                      # sparser patches between the clumps
+            hgt = (3 + 20 * min(d, 1.3) ** 1.1) * sc * rng.uniform(0.5, 1.4)
+            nb = int(rng.integers(2, 6))
+            lean = -0.2 + rng.normal(0, 0.12)
+            img = L if rng.random() < 0.55 else Dk
+            val = int(rng.uniform(60, 220))
+            wd = max(1, int(round((0.6 + 1.2 * min(d, 1.0)) * sc * ssf)))
+            for j in range(nb):
+                u = (j + rng.uniform(0.2, 0.8)) / nb - 0.5
+                a = -math.pi / 2 + lean + u * rng.uniform(0.6, 1.6)
+                ln = hgt * rng.uniform(0.5, 1.0) * (1 - 0.5 * abs(u))
+                p0 = (x + u * hgt * 0.2, y)
+                p1 = (p0[0] + math.cos(a) * ln, p0[1] + math.sin(a) * ln)
+                cv2.line(img, (int(p0[0] * ssf * 16), int(p0[1] * ssf * 16)), (int(p1[0] * ssf * 16), int(p1[1] * ssf * 16)),
+                         val, wd, cv2.LINE_AA, 4)
+        L = cv2.resize(L.astype(F32) / 255, (PW, PH), interpolation=cv2.INTER_AREA)
+        Dk = cv2.resize(Dk.astype(F32) / 255, (PW, PH), interpolation=cv2.INTER_AREA)
+        return L, Dk
+
     def _paint_rock(self, S, cx, cy, rx, ry, sd):
         """Backlit boulder, near-black: a broken angular outline, TWO facet values (a slightly lifted cool
         top plane vs the near-black face turned away from the sun, split along a ragged ridge line), dark
@@ -576,7 +687,7 @@ class Summit:
         ang = rng.uniform(-0.35, 0.35)
         ridge = (lx_ - ccx) * math.sin(ang) - (ly - (ccy - 0.15 * ry)) * math.cos(ang)
         wob = fbm(w, h, max(w / (30 * sc), 3), sd + 5, 3) * 0.12 * ry
-        top_f = ss(-1.5 * sc, 1.5 * sc, ridge + wob)          # 1 on the upper plane
+        top_f = ss(-4.0 * sc, 4.0 * sc, ridge + wob)          # 1 on the upper plane
         # the top plane splits in two: the half turned to the sun takes warm light, the far half the cool
         # sky; the face below the ridge line stays near-black, with a dim warm flank on the sun side
         sdir = 1.0 if sx > cx else -1.0
@@ -586,13 +697,15 @@ class Summit:
         # a near-black silhouette (the same family as the crest it sits in) read by two FLAT plane breaks:
         # a barely lifted cool top plane (sky), and a darker face turned away from the sun; no bevel, no
         # outline - the only light is a rim on the sun-facing top edge (added below)
-        dark = np.array([0.036, 0.03, 0.056], F32)
-        topv = np.array([0.062, 0.052, 0.094], F32)
-        awayv = np.array([0.02, 0.017, 0.03], F32)
+        dark = np.array([0.02, 0.016, 0.032], F32)
+        topv = np.array([0.05, 0.042, 0.078], F32)            # sky-lit top plane
+        awayv = np.array([0.013, 0.01, 0.022], F32)
         cut_a = -sdir * (lx_ - ccx) - rng.uniform(0.05, 0.3) * rx + (ly - ccy) * rng.uniform(-0.6, -0.2) + wob
         away_f = ss(-1.2 * sc, 1.2 * sc, cut_a) * (1 - top_f)
         col = dark + (topv - dark) * top_f[..., None]
         col = col + (awayv - col) * (away_f * 0.9)[..., None]
+        # the flank turned to the sun: a warm backlit plane (reflected dawn light)
+        col = col + (np.array([0.16, 0.075, 0.06], F32) - col) * (flank * 0.25 + bev * 0.2)[..., None]
         col = np.broadcast_to(col, (h, w, 3)).astype(F32)
         # cracks: dark fissures, with a hairline lit lip on their upper edge on the top plane
         Cm = np.zeros((h, w), F32)
@@ -626,6 +739,8 @@ class Summit:
         lc_col = np.array([0.1, 0.105, 0.085], F32) * (0.6 + 0.4 * top_f[..., None])
         col = col + (lc_col - col) * (Lc * 0.7)[..., None]
         sub = S[y0:y1, x0:x1]
+        # the lower part of the boulder sinks into the turf (no floating flat-bottomed lozenge)
+        m = m * ss(ccy + 0.7 * ry + 3.0 * sc * wob / (0.12 * ry + 1e-6), ccy + 0.2 * ry, ly)
         over(sub, col.astype(F32), m)
         self.rock_all[y0:y1, x0:x1] = np.maximum(self.rock_all[y0:y1, x0:x1], m)
         self.own_rim_mask[y0:y1, x0:x1] = np.maximum(self.own_rim_mask[y0:y1, x0:x1], m)
@@ -690,9 +805,9 @@ class Summit:
         span = 0.62 * Ht
         pw = 0.075 * Ht
         top = gyp - Ht
-        red_d = np.array([0.036, 0.011, 0.014], F32)
-        red_m = np.array([0.05, 0.015, 0.018], F32)          # near-black warm maroon
-        black = np.array([0.019, 0.014, 0.019], F32)
+        red_d = np.array([0.04, 0.012, 0.018], F32)
+        red_m = np.array([0.07, 0.02, 0.025], F32)           # backlit vermilion lacquer (slightly desaturated front)
+        black = np.array([0.016, 0.011, 0.022], F32)
         parts = []
         for s in (-1, 1):
             xb = cx + s * span / 2
@@ -735,7 +850,7 @@ class Summit:
         gv = fbm(self.PW, self.PH, max(self.PW / (5 * sc), 4), 71, 4, stretch=0.1)
         wr = fbm(self.PW, self.PH, max(self.PW / (3 * sc), 4), 72, 4, stretch=0.08)
         wp = fbm(self.PW, self.PH, max(self.PW / (14 * sc), 4), 73, 4)
-        wood = np.array([0.062, 0.05, 0.052], F32)       # silvered bare wood where the lacquer is gone
+        wood = np.array([0.05, 0.036, 0.05], F32)        # silvered bare wood where the lacquer is gone
         yy = np.arange(self.PH, dtype=F32)[:, None]
         TM = np.zeros((self.PH, self.PW), F32)
         masks = {}
@@ -747,7 +862,7 @@ class Summit:
             colr = c * (0.82 + 0.3 * ss(-0.4, 0.6, g)[..., None]) * (1 + 0.35 * ss(0.3, 0.9, wr)[..., None])
             if kind in ('v', 'h', 'k'):
                 worn = ss(0.4, 0.62, wp + 0.3 * wr)[..., None]
-                colr = colr + (wood - colr) * worn * 0.55
+                colr = colr + (wood - colr) * worn * 0.3
             if kind in ('v', 'n'):
                 colr = colr * (1 - 0.4 * ss(y0_, y1_, yy))[..., None]
             elif kind == 'k':
@@ -775,21 +890,42 @@ class Summit:
         self.own_rim_mask = np.maximum(self.own_rim_mask, TM)
         # --- rims, per member: sun-facing faces + near-horizontal top faces (sky), crisp 1-2 px
         rc = np.array([1.8, 1.1, 0.5], F32)
+        xx_t = np.arange(self.PW, dtype=F32)[None, :]
+        xsun = 0.12 + 0.88 * ss(cx - 0.35 * span, cx + 0.75 * span, xx_t)
         R = np.zeros((self.PH, self.PW), F32)
-        gain = dict(kasagi=1.0, nuki=0.85, pillarR=1.0, pillarL=0.2, nemaki=0.25)
+        gain = dict(kasagi=1.0, nuki=1.0, pillarR=1.0, pillarL=0.9, nemaki=0.35, shimaki=0.8)
         for name, m in masks.items():
             gk = gain.get(name, 0.0)
             if gk <= 0:
                 continue
-            r_sun = rim_normal(m, sx, sy, 0.9 * sc, soft=0.3 * sc, macro=0.8 * sc, power=1.2, bias=0.35)
+            r_sun = rim_normal(m, sx, sy, 2.8 * sc, soft=0.4 * sc, macro=0.8 * sc, power=0.9, bias=0.25)
             r_sky = rim_normal(m, sx, sy, 0.8 * sc, soft=0.3 * sc, macro=0.8 * sc, power=2.0, bias=0.55, up=1.0)
-            R = np.maximum(R, gk * np.maximum(r_sun, 0.7 * r_sky))
+            # the sky-lit top faces only catch real light toward the sun (right) end of each member
+            R = np.maximum(R, gk * np.maximum(1.3 * r_sun, 0.6 * r_sky * xsun))
         # nothing lit in the kasagi's shadow (just below its underside)
         R = R * (1 - ss(kas_bot - 0.004 * H, kas_bot + 0.002 * H, yy) * ss(kas_bot + 0.035 * H, kas_bot + 0.02 * H, yy))
-        self.extra_rim += (R * 0.8)[..., None] * rc
+        self.extra_rim += (R * 1.7)[..., None] * np.array([2.0, 1.0, 0.38], F32)
+        # a hot orange-vermilion glow band inside the sun-side edges and the top faces (lacquer lit through)
+        V = np.zeros((self.PH, self.PW), F32)
+        for name, m in masks.items():
+            gk = gain.get(name, 0.0)
+            if gk <= 0:
+                continue
+            v_sun = rim_normal(m, sx, sy, 9.0 * sc, soft=1.5 * sc, macro=1.5 * sc, power=0.8, bias=0.2)
+            v_top = rim_normal(m, sx, sy, 4.0 * sc, soft=1.0 * sc, macro=1.5 * sc, power=1.5, bias=0.4, up=1.0)
+            V = np.maximum(V, gk * np.maximum(v_sun, 0.35 * v_top * xsun))
+        V = V * (1 - ss(kas_bot - 0.004 * H, kas_bot + 0.002 * H, yy) * ss(kas_bot + 0.035 * H, kas_bot + 0.02 * H, yy))
+        self.extra_rim += (V * 0.9)[..., None] * np.array([1.1, 0.3, 0.08], F32)
+        # warm bounce from the lit cloud sea on the down-facing faces (kasagi / shimaki / nuki undersides)
+        B = np.zeros((self.PH, self.PW), F32)
+        for name in ('kasagi', 'shimaki', 'nuki'):
+            if name in masks:
+                B = np.maximum(B, rim_normal(masks[name], sx, sy + 40.0 * H, 5.0 * sc, soft=1.2 * sc,
+                                             macro=1.2 * sc, power=1.0, bias=0.3))
+        self.extra_rim += (B * 0.05)[..., None] * np.array([0.9, 0.45, 0.3], F32)
         # faint sheen on the lacquer: grazing light on the upper faces (a hair lighter, warm)
         sheen = rim_normal(TM, sx, sy, 4.0 * sc, soft=1.5 * sc, macro=2.0 * sc, power=1.5, bias=0.3, up=0.6)
-        self.extra_rim += (sheen * 0.05)[..., None] * np.array([0.9, 0.35, 0.2], F32)
+        self.extra_rim += (sheen * xsun * 0.03)[..., None] * np.array([0.9, 0.35, 0.2], F32)
         self.torii = dict(cx=cx, top=top, gy=gyp, span=span, pw=pw, Ht=Ht, yn=yn, tn=tn)
 
     def _shimenawa(self, S, D, Wt):
@@ -823,7 +959,7 @@ class Summit:
         over(S, np.broadcast_to(col, S[..., :3].shape).astype(F32), R)
         self.own_rim_mask = np.maximum(self.own_rim_mask, R)
         # warm specular on the top of the rope only (broken by the twist grooves)
-        sp = rim_normal(R, sx, sy, 1.0 * sc, soft=0.3 * sc, macro=0.8 * sc, power=2.0, bias=0.4, up=0.85)
+        sp = rim_normal(R, sx, sy, 1.2 * sc, soft=0.3 * sc, macro=0.8 * sc, power=1.5, bias=0.3, up=0.6)
         sp = sp * (1 - 0.8 * Vt)
         self.extra_rim += (sp * 0.8)[..., None] * np.array([1.6, 1.0, 0.5], F32)
         P = np.zeros((self.PH, self.PW), F32)
@@ -847,7 +983,7 @@ class Summit:
         paper = np.array([0.2, 0.14, 0.12], F32)
         over(D, np.broadcast_to(paper, D[..., :3].shape).astype(F32), P)
         pe = rim_normal(P, sx, sy, 0.8 * sc, soft=0.3 * sc, macro=0.6 * sc, power=1.2, bias=0.3)
-        self.paper_rim = (pe * 0.6)[..., None] * np.array([1.5, 1.0, 0.55], F32)
+        self.paper_rim = (pe * 0.9)[..., None] * np.array([1.6, 1.05, 0.55], F32)
 
     def _signpost(self, S):
         sc, W, H = self.sc, self.W, self.H
@@ -897,7 +1033,7 @@ class Summit:
         PW, PH = self.PW, self.PH
         A = np.zeros((PH, PW), F32)
         sw = np.zeros((PH, PW), F32)
-        bx = self.ox + 1.02 * W
+        bx = self.ox + 0.95 * W
         by = float(self.gy[min(int(bx), PW - 1)]) + 20 * sc
 
         def line(img, p0, p1, wd, val=1.0):
@@ -910,17 +1046,30 @@ class Summit:
         n = 26
         seg = 1.0 * H / n
         for i in range(n):
-            ang += rng.uniform(-0.14, 0.14) + (0.035 if i > 8 else 0.0)
+            ang += rng.uniform(-0.14, 0.14) + (0.022 if i > 8 else 0.0) + 0.09 * math.sin(i * 0.9 + 1.3)
             pos = pos + np.array([math.cos(ang), math.sin(ang)]) * seg
             tp.append(pos.copy())
         tp = np.asarray(tp)
         for i in range(len(tp) - 1):
-            wdt = (46 - 26 * i / len(tp)) * sc
+            u_t = i / len(tp)
+            wdt = (30 + 52 * (1 - u_t) ** 1.8 + 30 * max(0.0, 1 - u_t * 6) ** 2) * sc
             line(A, tp[i], tp[i + 1], wdt)
+            cv2.circle(A, (int(tp[i + 1][0] * 16), int(tp[i + 1][1] * 16)), int(wdt * 8), 1.0, -1, cv2.LINE_AA, 4)
         pads = []
         brs = []
         spec = [(9, -1, 0.17, 0.0), (12, -1, 0.21, -0.1), (15, -1, 0.15, -0.2), (17, 1, 0.07, 0.0),
-                (19, -1, 0.19, -0.15), (22, -1, 0.12, -0.25), (24, 1, 0.08, -0.2), (6, -1, 0.07, 0.25)]
+                (19, -1, 0.19, -0.15), (22, -1, 0.12, -0.25), (24, 1, 0.08, -0.2), (6, -1, 0.07, 0.25),
+                (14, -1, 0.11, 0.15), (21, -1, 0.15, 0.05)]
+        sx, sy = self.sun
+        spec2 = []
+        for (i, side, blen, lift) in spec:
+            # branches reaching toward the sun would lose their pads (kept clear of the sun): shorten them
+            # so no bare stick points into the glare
+            if side < 0 and tp[i][1] + 0.02 * W > sy - 0.12 * H:
+                room = (tp[i][0] - (sx + 0.1 * W) - 0.06 * W) / W
+                blen = float(np.clip(room, 0.05, blen))
+            spec2.append((i, side, blen, lift))
+        spec = spec2
         for (i, side, blen, lift) in spec:
             p = tp[i].copy()
             ang = (math.pi if side < 0 else 0.0) + lift * side * -1
@@ -930,9 +1079,13 @@ class Summit:
                 ang += rng.uniform(-0.3, 0.3)
                 p = p + np.array([math.cos(ang), math.sin(ang) * 0.7]) * blen * W / nseg
                 pts.append(p.copy())
-                if j in (3, 5) and rng.random() < 0.7:
-                    pads.append((p.copy() + np.array([0, -6 * sc]), rng.uniform(0.035, 0.05) * W, len(brs)))
-            pads.append((p.copy(), rng.uniform(0.05, 0.07) * W * (0.7 + 0.3 * blen / 0.2), len(brs)))
+                if j in (3, 5) and rng.random() < 0.75:
+                    pads.append((p.copy() + np.array([0, -6 * sc]), rng.uniform(0.04, 0.058) * W, len(brs)))
+            pads.append((p.copy(), rng.uniform(0.062, 0.085) * W * (0.7 + 0.3 * blen / 0.2), len(brs)))
+            # layered: a second, smaller pad tier stacked above / behind the end pad
+            if rng.random() < 0.6:
+                pads.append((p.copy() + np.array([rng.uniform(-0.3, 0.3) * 0.05 * W, -0.018 * W]),
+                             rng.uniform(0.03, 0.042) * W, len(brs)))
             brs.append(np.asarray(pts))
             for j in range(len(pts) - 1):
                 # thick where it leaves the trunk, tapering out toward the pad
@@ -940,9 +1093,7 @@ class Summit:
                 line(A, pts[j], pts[j + 1], wdt)
                 # twigs forking up into the pad
                 if j >= nseg - 4 and rng.random() < 0.8:
-                    q = pts[j + 1]
-                    a2 = -math.pi / 2 + rng.uniform(-0.9, 0.9)
-                    line(A, q, q + np.array([math.cos(a2), math.sin(a2)]) * rng.uniform(10, 26) * sc, 2.2 * sc)
+                    rng.uniform(-0.9, 0.9), rng.uniform(10, 26)      # (keeps the random stream; no bare twigs)
         sx, sy = self.sun
         pads = [(c, r, bi) for (c, r, bi) in pads if (c[0] - r) > sx + 0.1 * W or c[1] + r * 0.3 < sy - 0.12 * H]
         # ---- needle pads (2x supersampled): each pad is a HARD silhouette - a solid, flat-bottomed cloud of
@@ -976,203 +1127,193 @@ class Summit:
                 if img is G:
                     nl(TP, (bx_ + math.cos(a) * la * 0.55, by_ + math.sin(a) * la * 0.55), tip, 0.7 * sc + 0.25)
 
+        from lib import clouds3 as K_
         for (c, r, bi) in pads:
-            ry = r * 0.27
-            bx0, bx1 = int((c[0] - r * 1.5) * S2), int((c[0] + r * 1.5) * S2)
-            by0, by1 = int((c[1] - r * 1.0) * S2), int((c[1] + r * 0.6) * S2)
+            # ---- a FLAT, WIDE, THIN slab (height : width ~ 1 : 5) with a hard, clean underside. Only the
+            # top edge is modelled: 3-6 distinct cauliflower clumps (each crowned by a few rounded sub-lobes
+            # of varied size) with a fine, crisp needle serration along the up-facing contour - no fur, no
+            # halo, no drooping fringe.
+            hw = r * rng.uniform(1.05, 1.2)
+            th = 2.0 * hw / rng.uniform(4.6, 5.6)
+            flat_y = c[1] + r * 0.08
+            bx0, bx1 = int((c[0] - hw - 16 * sc) * S2), int((c[0] + hw + 16 * sc) * S2)
+            by0, by1 = int((flat_y - th * 1.5 - 16 * sc) * S2), int((flat_y + 6 * sc) * S2)
             bx0, by0 = max(bx0, 0), max(by0, 0)
             bx1, by1 = min(bx1, PW * S2), min(by1, PH * S2)
             bw, bh = bx1 - bx0, by1 - by0
-            if bw <= 4 or bh <= 4:
+            if bw <= 8 or bh <= 8:
                 continue
-            L = np.zeros((bh, bw), np.uint8)
-            k = int(3 + r / (22 * sc))
-            flat_y = c[1] + ry * rng.uniform(0.25, 0.45)
-            # the pad is 2-4 separate needle CLUMPS with sky gaps between them (not one elongated slab)
-            ncl = int(np.clip(round(r / (40 * sc)) + rng.integers(-1, 1), 2, 4))
-            edges_ = np.linspace(-0.95, 0.95, ncl + 1)
-            edges_[1:-1] += rng.uniform(-0.12, 0.12, ncl - 1)
-            gap_ = (8 * sc) / r + rng.uniform(0.03, 0.07, ncl + 1)          # half-gap in units of r
-            cl_ = []
-            for ci in range(ncl):
-                a_, b_ = edges_[ci] + (gap_[ci] if ci > 0 else 0.0), edges_[ci + 1] - (gap_[ci + 1] if ci < ncl - 1 else 0.0)
-                cl_.append((a_, b_, rng.uniform(-0.35, 0.15) * ry))
-            kpc = int(rng.integers(2, 4))
-            uus = []
-            for (a_, b_, dy_) in cl_:
-                for j in range(kpc):
-                    uus.append((a_ + (b_ - a_) * (0.3 + 0.4 * (j + rng.uniform(0.3, 0.7)) / kpc), (b_ - a_) / kpc, dy_))
-            for (uu, du_, dyc_) in uus:
-                rcx = r * du_ * kpc * 0.5 * rng.uniform(0.6, 0.78)
-                rcy = rcx * rng.uniform(0.34, 0.44)
-                ccx_ = c[0] + uu * r
-                ccy_ = flat_y - rcy * rng.uniform(0.45, 0.9) - ry * 0.5 * (1 - abs(uu)) * rng.uniform(0.6, 1.2) + dyc_
-                cv2.ellipse(L, (int((ccx_ * S2 - bx0) * 16), int((ccy_ * S2 - by0) * 16)),
-                            (int(rcx * S2 * 16), int(rcy * S2 * 16)), rng.uniform(-8, 8), 0, 360, 255, -1,
+            Lc = np.zeros((bh, bw), np.uint8)
+
+            def blob(img, x, y, ax, ay, ang=0.0):
+                cv2.ellipse(img, (int(round((x * S2 - bx0) * 16)), int(round((y * S2 - by0) * 16))),
+                            (max(int(ax * S2 * 16), 16), max(int(ay * S2 * 16), 16)), ang, 0, 360, 255, -1,
                             cv2.LINE_AA, 4)
-                # crown scallop on top of some lobes
-                if rng.random() < 0.6:
-                    cv2.ellipse(L, (int(((ccx_ + rng.uniform(-0.4, 0.4) * rcx) * S2 - bx0) * 16),
-                                    int(((ccy_ - rcy * 0.55) * S2 - by0) * 16)),
-                                (int(rcx * 0.55 * S2 * 16), int(rcy * 0.5 * S2 * 16)), 0, 0, 360, 255, -1,
-                                cv2.LINE_AA, 4)
-            # flat underside (slightly wavy), lobes tuck under at the ends
-            xsl = (np.arange(bw, dtype=F32) + bx0) / S2
-            fb = flat_y + 2.0 * sc * frac1d(bw, int(rng.integers(0, 1 << 30)), 4, 6, 0.6) + \
-                ry * 0.25 * ((xsl - c[0]) / r) ** 2
-            yl = (np.arange(bh, dtype=F32)[:, None] + by0) / S2
-            L = (L.astype(F32) * (yl < fb[None, :])).astype(np.uint8)
-            # limbs: the pad grows out of its branch - a hub on the branch below the pad fans 3-5 tapering,
-            # up-curving limbs into the underside of the pad (no pad floats on a bare stick)
-            # nearest point on any branch / the trunk (densified polylines)
-            bp = np.concatenate([np.concatenate([np.linspace(P0, P1, 12) for P0, P1 in zip(Q[:-1], Q[1:])])
-                                 for Q in [brs[bi], tp]])
-            dd_ = np.hypot(bp[:, 0] - c[0], (bp[:, 1] - flat_y) * 1.3) + 2.5 * r * (bp[:, 1] < flat_y - 0.2 * ry)
-            k0 = int(np.argmin(dd_))
-            hub = bp[k0]
-            if True:
-                far_ = dd_[k0] > 1.1 * r
-                # one limb into every clump (so each clump visibly grows from the branch)
-                tgt_ = [((a_ + b_) / 2, dy_) for (a_, b_, dy_) in cl_]
-                if far_:
-                    tgt_ = tgt_[:1] + [t_ for t_ in tgt_[1:]]
-                nlimb = len(tgt_)
-                for li_ in range(nlimb):
-                    uu = tgt_[li_][0] + rng.uniform(-0.05, 0.05)
-                    tx_, ty_ = c[0] + uu * r * 0.95, flat_y - ry * rng.uniform(0.1, 0.4) + tgt_[li_][1] * 0.6
-                    mx_ = (hub[0] + tx_) / 2 + rng.uniform(-0.1, 0.1) * r
-                    my_ = max(hub[1], ty_) + abs(tx_ - hub[0]) * 0.12 + 4 * sc
-                    seg_ = 10
-                    pp_ = None
-                    kink_ = rng.uniform(4.0, 10.0) * sc
-                    w0_ = (6.5 - 2.5 * abs(uu)) * sc
-                    for q_ in range(seg_ + 1):
-                        t_ = q_ / seg_
-                        qx = (1 - t_) ** 2 * hub[0] + 2 * (1 - t_) * t_ * mx_ + t_ * t_ * tx_
-                        qy = (1 - t_) ** 2 * hub[1] + 2 * (1 - t_) * t_ * my_ + t_ * t_ * ty_
-                        # gnarled: a couple of angular kinks along the limb (pines grow in zig-zags)
-                        qx += math.sin(t_ * math.pi) * kink_ * math.sin(t_ * 7.0 + li_)
-                        if pp_ is not None:
-                            line(A, pp_, (qx, qy), w0_ * (1 - 0.7 * t_) + 0.8 * sc)
-                        pp_ = (qx, qy)
-            # needles along the contour: irregular CLUSTERS (length varies 0.4x-1.8x along the edge through a
-            # slow 1D noise, uneven spacing, bare gaps), pointing outward + upward; underside stays clean
-            cnts, _ = cv2.findContours((L > 127).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            ncl = int(np.clip(round(2 * hw / (60 * sc)) + rng.integers(-1, 2), 3, 6))
+            wts = rng.uniform(0.7, 1.3, ncl)
+            edges_ = np.concatenate([[0.0], np.cumsum(wts)]) / wts.sum() * 2.0 - 1.0
+            # shared flat base slab (the clumps sit on it)
+            blob(Lc, c[0], flat_y - th * 0.2, hw, th * 0.32)
+            crowns = []
+            for ci in range(ncl):
+                a_, b_ = edges_[ci], edges_[ci + 1]
+                mid_ = 1.0 - abs((a_ + b_) / 2)            # middle clumps stand taller, the ends taper
+                cxc = c[0] + (a_ + b_) / 2 * hw * 0.94
+                hwc = (b_ - a_) / 2 * hw * rng.uniform(0.86, 1.0)
+                hc_ = th * rng.uniform(0.7, 1.05) * (0.5 + 0.5 * mid_ ** 0.6)
+                yc_ = flat_y - th * 0.3
+                ay_ = max(hc_ - th * 0.3, th * 0.2)
+                blob(Lc, cxc, yc_, hwc, ay_)
+                # crown: 2-4 rounded sub-lobes of varied size along the dome's upper arc (cauliflower)
+                nb_ = int(rng.integers(2, 5))
+                for k_ in range(nb_):
+                    th_ = math.pi * (0.15 + 0.7 * (k_ + rng.uniform(0.3, 0.7)) / nb_)
+                    rb_ = hwc * rng.uniform(0.3, 0.46)
+                    px_ = cxc + math.cos(th_) * hwc * 0.66
+                    py_ = yc_ - math.sin(th_) * ay_ * 0.72
+                    blob(Lc, px_, py_, rb_, rb_ * rng.uniform(0.72, 0.9))
+                    crowns.append((px_, py_, rb_, rb_ * 0.8))
+            # needle fans: every crown lobe's upper arc is bristled with short stiff needles radiating
+            # from the lobe centre (a half-starburst per lobe), so each clump reads as a cauliflower tuft
+            # of needles - grouped fans with notches between them, never a continuous fur
+            Tl = np.zeros((bh, bw), np.uint8)
+            for (qx_, qy_, qa_, qb_) in crowns:
+                arc = math.pi * 0.5 * (qa_ + qb_)
+                nbm = max(int(arc / (2.3 * sc)), 6)
+                ln0 = rng.uniform(0.28, 0.4) * qa_ + 2.0 * sc
+                for k_ in range(nbm):
+                    t_ = math.pi * (0.06 + 0.88 * (k_ + rng.uniform(0.2, 0.8)) / nbm)
+                    ex_, ey_ = qx_ + math.cos(t_) * qa_ * 0.8, qy_ - math.sin(t_) * qb_ * 0.8
+                    a = -t_ + rng.uniform(-0.12, 0.12)
+                    la = ln0 * rng.uniform(0.75, 1.1) * (0.55 + 0.45 * math.sin(t_))
+                    wb = 0.8 * sc
+                    pxn, pyn = -math.sin(a) * wb, math.cos(a) * wb
+                    poly = np.array([(ex_ + pxn, ey_ + pyn), (ex_ + math.cos(a) * la, ey_ + math.sin(a) * la),
+                                     (ex_ - pxn, ey_ - pyn)]) * S2 - np.array([bx0, by0])
+                    cv2.fillPoly(Tl, [np.round(poly * 16).astype(np.int32)], 255, cv2.LINE_AA, shift=4)
+            Lf = cv2.GaussianBlur(Lc.astype(F32) / 255.0, (0, 0), 0.8 * S2 * sc)
+            # up-facing contour weight (macro normal)
+            Lm = cv2.GaussianBlur(Lf, (0, 0), 5.0 * S2 * sc)
+            gyl = cv2.Sobel(Lm, cv2.CV_32F, 0, 1, ksize=3)
+            gxl = cv2.Sobel(Lm, cv2.CV_32F, 1, 0, ksize=3)
+            nyl = gyl / (np.sqrt(gxl * gxl + gyl * gyl) + 1e-6)          # +1 = edge faces up
+            w_up = ss(0.0, 0.6, nyl)
+            # fine needle serration: vertically elongated noise, a few px deep, only on the upper contour
+            nz = K_._noise(bw, bh, max(bw / (2.6 * S2 * sc), 4), int(rng.integers(0, 1 << 20)), 2, stretch=0.22)
+            nz2 = K_._noise(bw, bh, max(bw / (9.0 * S2 * sc), 4), int(rng.integers(0, 1 << 20)), 2, stretch=0.5)
+            v = Lf + (0.06 * nz + 0.03 * nz2) * w_up
+            L = np.maximum(ss(0.45, 0.55, v), Tl.astype(F32) / 255.0)
+            # hard, clean underside: a near-straight cut (1 px waver), the ends tucking up a little
+            xsl = (np.arange(bw, dtype=np.float64) + bx0 + 0.5) / S2
+            uu_ = (xsl - c[0]) / hw
+            fb = (flat_y + 0.8 * sc * frac1d(bw, int(rng.integers(0, 1 << 30)), 3, 5, 0.5)
+                  - th * 0.5 * np.clip((np.abs(uu_) - 0.8) / 0.2, 0, 1) ** 2)
+            yl = (np.arange(bh, dtype=np.float64)[:, None] + by0 + 0.5) / S2
+            cut = np.clip((fb[None, :] - yl) * S2 + 0.5, 0, 1).astype(F32)
+            L = (np.clip(L * cut, 0, 1) * 255).astype(np.uint8)
             G[by0:by1, bx0:bx1] = np.maximum(G[by0:by1, bx0:bx1], L)
-            HOLE = np.zeros((bh, bw), np.uint8)
-            for cn in cnts:
-                P_ = cn[:, 0, :].astype(np.float64)
-                npt = len(P_)
-                if npt < 8:
-                    continue
-                lnz = frac1d(npt + 1, int(rng.integers(0, 1 << 30)), 4, max(npt // int(60 * sc * S2 + 1), 3), 0.55)
-                i_ = int(rng.integers(0, 6))
-                while i_ < npt:
-                    p0 = P_[(i_ - 3) % npt]
-                    p1 = P_[(i_ + 3) % npt]
-                    tx, ty = p1[0] - p0[0], p1[1] - p0[1]
-                    tn_ = math.hypot(tx, ty) + 1e-6
-                    nx_, ny_ = ty / tn_, -tx / tn_
-                    px_, py_ = (P_[i_, 0] + bx0) / S2, (P_[i_, 1] + by0) / S2
-                    if (px_ - c[0]) * nx_ + (py_ - (flat_y - ry * 0.6)) * ny_ < 0:
-                        nx_, ny_ = -nx_, -ny_
-                    lm = float(np.clip(1.0 + 1.3 * lnz[i_], 0.0, 1.9))
-                    step_px = rng.uniform(3.0, 8.0) * sc
-                    # natural gaps: where the length noise dips, the fringe breaks and the sky shows through
-                    if ny_ < 0.25 and lm > 0.3 and rng.random() > 0.08:
-                        a0 = math.atan2(ny_ * 0.6 - 0.4, nx_ * 0.6) + rng.normal(0, 0.15)
-                        rt = rng.uniform(6, 13) * sc * max(lm, 0.4) * (1.0 if ny_ < -0.3 else 0.8)
-                        nn = int(rng.integers(6, 12))
-                        fan(px_ - nx_ * rt * 0.35, py_ - ny_ * rt * 0.35, a0, rt, nn, rng.uniform(0.5, 0.85))
-                    elif ny_ >= 0.25 and rng.random() < 0.75:
-                        # underside: short drooping needle brushes (the pad reads as needles all round)
-                        a0 = math.atan2(ny_ * 0.7 + 0.45, nx_ * 0.6) + rng.normal(0, 0.2)
-                        rt = rng.uniform(3.5, 8.0) * sc * max(lm, 0.5)
-                        fan(px_ - nx_ * rt * 0.3, py_ - ny_ * rt * 0.3, a0, rt, int(rng.integers(5, 9)),
-                            rng.uniform(0.4, 0.7))
-                    elif ny_ < 0.25 and lm <= 0.3 and rng.random() < 0.35 and ny_ < -0.2:
-                        # notch: a small sky gap cut into the pad between clusters
-                        d_ = rng.uniform(3.0, 7.0) * sc
-                        hx_ = (px_ - nx_ * d_ * 0.5) * S2 - bx0
-                        hy_ = (py_ - ny_ * d_ * 0.5) * S2 - by0
-                        hr = rng.uniform(1.2, 2.6) * sc * S2
-                        cv2.ellipse(HOLE, (int(hx_ * 16), int(hy_ * 16)), (int(hr * 16), int(d_ * S2 * 0.6 * 16)),
-                                    math.degrees(math.atan2(ny_, nx_)) + 90, 0, 360, 255, -1, cv2.LINE_AA, 4)
-                    i_ += max(int(step_px * S2), 2)
-            # punch the sky holes (then a couple of needles cross each one)
-            if HOLE.any():
-                sub_ = G[by0:by1, bx0:bx1]
-                sub_[:] = (sub_.astype(F32) * (1 - HOLE.astype(F32) / 255.0)).astype(np.uint8)
-            # stray tufts poking above the crown (they sway more)
-            for _ in range(int(rng.integers(0, 3))):
-                x_ = c[0] + rng.uniform(-0.8, 0.8) * r
-                col_ = int(np.clip(x_ * S2 - bx0, 0, bw - 1))
-                rows = np.nonzero(L[:, col_] > 127)[0]
-                if not len(rows):
-                    continue
-                y_ = (rows[0] + by0) / S2 + 2 * sc
-                rt = rng.uniform(10, 22) * sc
-                a0 = -math.pi / 2 + rng.uniform(-0.6, 0.4)
-                st = rng.bit_generator.state
-                fan(x_, y_, a0, rt, 7, 0.5)
-                rng.bit_generator.state = st
-                fan(x_, y_, a0, rt, 7, 0.5, img=Tf)
-            cv2.ellipse(PM, (int(c[0]), int(c[1])), (int(r * 1.3), int(ry * 1.6)), 0, 0, 360, 255, -1)
-            cv2.ellipse(sw, (int(c[0]), int(c[1])), (int(r * 1.2), int(ry * 2.0)), 0, 0, 360, 1.0, -1)
-        # fine twigs: a few thin bare shoots off the branches (hairline silhouettes)
-        for (i, side, blen, lift) in spec:
-            p = tp[i].copy()
-            for _ in range(2):
-                a2 = (math.pi if side < 0 else 0.0) + rng.uniform(-0.9, 0.5)
-                q0 = p + np.array([math.cos(a2), math.sin(a2)]) * rng.uniform(0.02, 0.06) * W * 0.5
-                q1 = q0 + np.array([math.cos(a2 - 0.4), math.sin(a2 - 0.4)]) * rng.uniform(15, 35) * sc
-                q2 = q1 + np.array([math.cos(a2 + 0.3), math.sin(a2 + 0.3)]) * rng.uniform(10, 22) * sc
-                line(A, p + (q0 - p) * 0.15, q0, 2.0 * sc)
-                line(A, q0, q1, 1.4 * sc)
-                line(A, q1, q2, 1.0 * sc)
+            cv2.ellipse(PM, (int(c[0]), int(flat_y - th * 0.5)), (int(hw * 1.1), int(th * 0.9)), 0, 0, 360, 255, -1)
+            cv2.ellipse(sw, (int(c[0]), int(flat_y - th * 0.5)), (int(hw * 1.1), int(th * 1.2)), 0, 0, 360, 1.0, -1)
         self.pine_pads = cv2.GaussianBlur(PM.astype(F32) / 255.0, (0, 0), 6 * sc)
         self._pine_A = A
         N = cv2.resize(G.astype(F32) / 255.0, (PW, PH), interpolation=cv2.INTER_AREA)
         Tn = cv2.resize(Tf.astype(F32) / 255.0, (PW, PH), interpolation=cv2.INTER_AREA)
-        # values: one flat dark mass; a faint cool lift only on the flat crowns (hard-edged plane)
-        crown = rim_normal(N, sx, sy, 6.0 * sc, soft=0.0, macro=5.0 * sc, power=1.0, bias=0.4, up=1.0)
-        crown = ss(0.25, 0.4, crown)
-        nz = fbm(PW, PH, max(PW / (10 * sc), 4), 58, 3)
-        nc_ = np.broadcast_to(SIL_D, (PH, PW, 3)).astype(F32) * 0.95
-        Ni = cv2.resize(NI.astype(F32) / 255.0, (PW, PH), interpolation=cv2.INTER_AREA)
-        upl = rim_normal(N, sx, sy, 14.0 * sc, soft=2.0 * sc, macro=6.0 * sc, power=1.0, bias=0.0, up=1.0)
-        # backlit translucency ONLY on the sun side (left / lower-left for pads above the sun, upper-left
-        # below it): needle tips there glow olive-gold
-        Tp = cv2.resize(TP.astype(F32) / 255.0, (PW, PH), interpolation=cv2.INTER_AREA)
-        edge_s = rim_normal(N, sx - 0.4 * W, sy - 0.9 * H, 5.0 * sc, soft=0.5 * sc, macro=3.0 * sc, power=1.3, bias=0.25)
-        dsun = np.sqrt((np.arange(PW, dtype=F32)[None, :] - sx) ** 2 + (np.arange(PH, dtype=F32)[:, None] - sy) ** 2) / W
-        allow_, down_ = pad_facing(N, sc)
-        self.pad_allow = np.maximum(allow_, 1.0 - np.clip(cv2.dilate(N, np.ones((int(15 * sc) | 1,) * 2, np.uint8)), 0, 1))
-        tl = np.clip(Tp * np.clip(edge_s * 1.8, 0, 1) * (0.35 + 0.5 * np.exp(-(dsun / 0.3) ** 2)), 0, 1) * allow_
-        nc_ = nc_ + np.array([0.3, 0.17, 0.05], F32) * tl[..., None]
-        # where a pad crosses the bright sky near the sun: a warm translucent fringe on the needle tips of
-        # the edges turned toward the sun (the real sun direction), fading with distance from it
-        edge_t = rim_normal(N, sx, sy, 4.0 * sc, soft=0.4 * sc, macro=2.0 * sc, power=1.2, bias=0.25, up=0.6)
-        near_ = np.exp(-(dsun / 0.32) ** 2)
-        tl2 = np.clip((0.6 * Tp + 0.5 * edge_t) * edge_t * near_ * 1.8, 0, 1) * allow_
-        nc_ = nc_ + np.array([0.42, 0.22, 0.06], F32) * tl2[..., None]
-        # undersides: the needle fringe stays dark and cool (sky bounce from above does not reach it)
-        dist_ = cv2.distanceTransform((N > 0.5).astype(np.uint8), cv2.DIST_L2, 5).astype(F32)
-        uband = down_ * np.exp(-dist_ / (10.0 * sc))
-        nc_ = nc_ + (np.array([0.016, 0.02, 0.052], F32) - nc_) * (0.85 * uband)[..., None]
-        self.pine_fringe = (tl2 * near_).astype(F32)
-        # bark: black pine plates - vertical fissures, scaly plates, a warmer lifted left (sun) side
-        bark = np.array([0.045, 0.034, 0.042], F32)
-        nzb = fbm(PW, PH, max(PW / (4 * sc), 4), 58, 4, stretch=0.25)
-        pl_ = fbm(PW, PH, max(PW / (9 * sc), 4), 59, 3, stretch=0.6)
-        fis = 1 - np.abs(fbm(PW, PH, max(PW / (6 * sc), 4), 60, 3, stretch=0.12))
-        bc = bark * (0.75 + 0.45 * ss(-0.2, 0.4, pl_)[..., None]) * (1 - 0.55 * ss(0.8, 0.95, fis)[..., None])
-        bc = bc * (0.9 + 0.2 * ss(-0.3, 0.5, nzb)[..., None])
+        # ---- values: flat painted silhouettes. Pads: one flat near-black mass with a clean flat underside.
+        # Trunk / limbs: a flat dark value with a couple of painted bark bands. Light: a hot orange rim only
+        # on the edges facing the sun (left / upper-left), 2-4 px hot, melting into a warm glow over ~20 px.
+        Nc = np.clip(N, 0, 1)
         Ab = np.clip(A, 0, 1)
-        side = rim_normal(Ab, sx, sy, 5.0 * sc, soft=1.0 * sc, macro=3.0 * sc, power=1.0, bias=0.1)
-        bc = bc + (np.array([0.11, 0.07, 0.06], F32) - bc) * (side * 0.5 * ss(-0.2, 0.3, pl_))[..., None]
+        nc_ = np.broadcast_to(np.array([0.016, 0.014, 0.032], F32), (PH, PW, 3)).astype(F32)
+        # a barely lifted cool top plane on the flat crowns (sky light), hard-edged, never on the underside
+        upl = rim_normal(Nc, sx, sy, 7.0 * sc, soft=0.0, macro=6.0 * sc, power=1.0, bias=0.4, up=1.0)
+        nc_ = nc_ + np.array([0.012, 0.012, 0.028], F32) * ss(0.3, 0.45, upl)[..., None]
+        # bark: flat dark silhouette + a few broad, slightly lighter / darker bark bands (painted, no stipple)
+        bark = np.array([0.03, 0.024, 0.036], F32)
+        bnd = fbm(PW, PH, max(PW / (60 * sc), 4), 60, 2, stretch=6.0, angle=-12)
+        bnd2 = fbm(PW, PH, max(PW / (25 * sc), 4), 61, 2, stretch=4.0, angle=-12)
+        bv = ss(0.12, 0.2, bnd + 0.25 * bnd2) * 0.35 - ss(0.12, 0.2, -bnd - 0.25 * bnd2) * 0.3
+        bc = bark * (1 + bv[..., None])
+        # black-pine bark: plates broken by dark cross fissures and a few long splits (so the trunk reads as
+        # painted bark, not a smooth rendered tube); each plate's upper lip catches a little warm light
+        rb = np.random.default_rng(self.seed + 77)
+        # black-pine bark, painted: long vertical plate strokes running along the trunk (a hair lighter or
+        # darker than the body) and only a few short horizontal fissures - no tiled cross-hatch
+        Bk = np.zeros((PH, PW), F32)
+        Bp = np.zeros((PH, PW), F32)
+        for i in range(len(tp) - 1):
+            u_t = i / len(tp)
+            wdt = (30 + 52 * (1 - u_t) ** 1.8 + 30 * max(0.0, 1 - u_t * 6) ** 2) * sc
+            d_ = tp[i + 1] - tp[i]
+            L_ = float(np.hypot(*d_)) + 1e-6
+            t_ = d_ / L_
+            nr_ = np.array([-t_[1], t_[0]])
+            for k_ in range(int(rb.integers(3, 6))):
+                off = rb.uniform(-0.42, 0.42) * wdt
+                c0 = tp[i] + d_ * rb.uniform(-0.3, 1.0)
+                ln_ = rb.uniform(0.6, 1.6) * L_
+                wv = rb.uniform(1.4, 3.6) * sc
+                img_ = Bp if rb.random() < 0.55 else Bk
+                line(img_, c0 + nr_ * off, c0 + nr_ * (off + rb.uniform(-2, 2) * sc) + t_ * ln_, wv,
+                     rb.uniform(0.5, 1.0))
+            if rb.random() < 0.45:
+                off = rb.uniform(-0.35, 0.3) * wdt
+                c0 = tp[i] + d_ * rb.uniform(0, 1)
+                half = rb.uniform(0.08, 0.2) * wdt
+                line(Bk, c0 + nr_ * (off - half), c0 + nr_ * (off + half) + t_ * rb.uniform(-2, 2) * sc,
+                     rb.uniform(1.2, 2.0) * sc)
+        Bk = cv2.GaussianBlur(np.clip(Bk, 0, 1), (0, 0), 0.6 * sc)
+        Bp = cv2.GaussianBlur(np.clip(Bp, 0, 1), (0, 0), 0.6 * sc) * (1 - Bk)
+        bc = bark * (1 + 0.5 * bv[..., None])
+        bc = bc * (1 - 0.45 * Bk[..., None]) + (Bp * 0.5)[..., None] * np.array([0.03, 0.022, 0.03], F32)
+        # ---- rim (sun-facing edges only): outward normal from the blurred silhouette, light direction =
+        # toward the sun, bent upward (pads above the sun light on their left / upper-left, never below)
+        yy_, xx_ = np.mgrid[0:PH, 0:PW].astype(F32)
+        tx_, ty_ = sx - xx_, sy - yy_
+        tn_ = np.sqrt(tx_ * tx_ + ty_ * ty_) + 1e-3
+        lx_, ly_ = tx_ / tn_ - 0.5, ty_ / tn_ - 0.75
+        ln_ = np.sqrt(lx_ * lx_ + ly_ * ly_) + 1e-6
+        lx_, ly_ = lx_ / ln_, ly_ / ln_
+        dsun = tn_ / W
+        prox = 0.55 + 0.45 * np.exp(-(dsun / 0.35) ** 2)
+
+        def facing(M, sig):
+            Mb = cv2.GaussianBlur(M, (0, 0), sig)
+            gx = cv2.Sobel(Mb, cv2.CV_32F, 1, 0, ksize=3)
+            gy_ = cv2.Sobel(Mb, cv2.CV_32F, 0, 1, ksize=3)
+            gn = np.sqrt(gx * gx + gy_ * gy_) + 1e-6
+            nx, ny = -gx / gn, -gy_ / gn
+            f_ = np.clip(nx * lx_ + ny * ly_, 0, 1)
+            return f_ * ss(0.35, -0.05, ny) * ss(0.0, 0.02, gn)
+
+        # pads: normals at two scales (hot hairline follows the needle fringe, the warm glow the pad mass)
+        Npad = np.clip(Nc, 0, 1)
+        dpad = cv2.distanceTransform((Npad > 0.5).astype(np.uint8), cv2.DIST_L2, 5).astype(F32)
+        f_hot = facing(Npad, 2.0 * sc)
+        f_warm = facing(Npad, 10.0 * sc)
+        # hot 2-4 px line on the sun-facing (upper-left) contour, melting into the near-black body over
+        # ~10-20 px (a warm mid-value glow that decays; no halo outside the silhouette)
+        hotp = ss(0.25, 0.7, f_hot) * ss(0.2, 0.6, f_warm) * np.exp(-dpad / (1.3 * sc))
+        warmp = ss(0.35, 0.85, f_warm) * np.exp(-dpad / (6.5 * sc)) * ss(0.0, 2.0 * sc, dpad)
+        # trunk / limbs: a single warm lit edge on the sun (left) side: 3-6 px hot, falling off over ~25 px
+        dtr = cv2.distanceTransform((Ab > 0.5).astype(np.uint8), cv2.DIST_L2, 5).astype(F32)
+        f_tr = facing(Ab, 3.0 * sc)
+        f_trm = facing(Ab, 12.0 * sc)
+        hott = ss(0.3, 0.75, f_tr) * np.exp(-dtr / (2.2 * sc))
+        warmt = ss(0.2, 0.8, f_trm) * np.exp(-dtr / (9.0 * sc)) * ss(0.0, 2.0 * sc, dtr)
+        # the lit bark plates near the lit edge catch a little of the warm light (painted plate strokes)
+        warmt = warmt * (0.75 + 0.9 * Bp) * (1 - 0.5 * Bk)
+        # the pads cover the limbs: only the visible (uncovered) part of each keeps its light
+        vis_t = Ab * (1 - Nc)
+        rim_hot = (hotp * Nc + hott * vis_t) * prox
+        rim_warm = (warmp * Nc + 0.8 * warmt * vis_t) * prox
+        self.pine_rim = (rim_hot[..., None] * np.array([1.9, 0.92, 0.34], F32) * 1.25 +
+                         rim_warm[..., None] * np.array([0.34, 0.12, 0.04], F32)).astype(F32)
+        self.extra_rim += self.pine_rim
+        self.pine_own = cv2.dilate(np.clip(Nc + Ab, 0, 1), np.ones((3, 3), np.uint8))
+        self.pad_allow = np.ones((PH, PW), F32)
+        self.pine_fringe = np.zeros((PH, PW), F32)
         over(D, bc.astype(F32), Ab)
-        over(D, nc_.astype(F32), np.clip(N, 0, 1))
+        over(D, nc_.astype(F32), Nc)
         yy = np.arange(PH, dtype=F32)[:, None]
         hfac = ss(by, by - 0.8 * H, yy)
         Wt[:] = np.maximum(Wt, cv2.GaussianBlur(sw, (0, 0), 8 * sc) * 1.25 * hfac + np.clip(A, 0, 1) * hfac * 0.2)
@@ -1425,13 +1566,13 @@ class Summit:
             x = rng.uniform(-40, 0) * sc
             while x < PW + 40 * sc:
                 # a run of clumps, then a bare gap
-                run = int(rng.integers(4, 15))
+                run = int(rng.integers(8, 22))
                 for _ in range(run):
                     xi = int(np.clip(x, 0, PW - 1))
                     hg = rng.uniform(hmin, hmax) * (1.6 if rng.random() < 0.08 else 1.0)
                     clump(img, x, float(line[xi]) + hg * 0.08, hg, int(rng.integers(5, 13)), tip_img)
                     x += rng.uniform(0.18, 0.5) * hmax * dens
-                x += rng.uniform(0.2, 1.6) * hmax
+                x += rng.uniform(0.05, 0.6) * hmax
 
         # crest plane fringe (smaller: it is further away), mound fringe (bigger, nearer)
         tor = self.torii
@@ -1446,7 +1587,9 @@ class Summit:
                 x = cx + rng.uniform(-1.0, 1.0) * rx
                 yb = cy + ry * rng.uniform(0.2, 0.5) * (1 - 0.5 * ((x - cx) / rx) ** 2)
                 clump(GR, x, yb, rng.uniform(0.3, 0.6) * ry, int(rng.integers(6, 11)))
-        # (no blade sprites down the slope: the hill interior stays a clean near-black gradient)
+        # the nearer mound: its own row of silhouette clumps (a step in front of the crest plane)
+        TF = np.zeros_like(TB)
+        row(GF, self.gy2, 16 * sc, 44 * sc, 1.0, TF)
         ab = cv2.resize(GB.astype(F32) / 255, (PW, PH), interpolation=cv2.INTER_AREA)
         af = cv2.resize(GF.astype(F32) / 255, (PW, PH), interpolation=cv2.INTER_AREA)
         tb = cv2.resize(TB.astype(F32) / 255, (PW, PH), interpolation=cv2.INTER_AREA)
@@ -1454,8 +1597,10 @@ class Summit:
         dx = (np.arange(PW, dtype=F32)[None, :] - sx) / W
         sunw = np.exp(-(dx / 0.25) ** 2)
         # crest clumps: the crest's lifted silhouette value; tips glow (light through the blades) near the sun
-        cb = np.broadcast_to(np.array([0.085, 0.07, 0.125], F32), (PH, PW, 3)).copy()
+        cb = np.broadcast_to(np.array([0.1, 0.07, 0.12], F32), (PH, PW, 3)).copy()
         cb = cb * (1 - 0.25 * ss(gy[None, :] - 10 * sc, gy[None, :] + 30 * sc, yy))[..., None]
+        # the turf blades near the sun column catch the warm backlight through their bodies
+        cb = cb + (np.array([0.24, 0.11, 0.07], F32) - cb) * (0.45 * np.exp(-(dx / 0.35) ** 2))[..., None]
         cb = cb + np.array([0.42, 0.24, 0.07], F32) * (tb * (0.1 + 0.9 * sunw) * 0.55)[..., None]
         over(D, cb.astype(F32), ab)
         ar = cv2.resize(GR.astype(F32) / 255, (PW, PH), interpolation=cv2.INTER_AREA)
@@ -1463,7 +1608,13 @@ class Summit:
         # the mound itself (static) and its clumps (sway) share the near-black value
         over(S, np.broadcast_to(mcol, S[..., :3].shape).astype(F32), mm)
         self.mound_all = np.clip(mm + af, 0, 1)
-        over(D, np.broadcast_to(mcol, D[..., :3].shape).astype(F32), af)
+        tf = cv2.resize(TF.astype(F32) / 255, (PW, PH), interpolation=cv2.INTER_AREA)
+        mc2 = mcol + np.array([0.05, 0.045, 0.09], F32) * tf[..., None] * 0.2     # sky-lit blade tips (subdued)
+        over(D, mc2.astype(F32), af)
+        # a cool sky line on the mound's top edge (it lies in the crest's shadow: no warm rim)
+        mr = rim_normal(np.clip(mm + af, 0, 1), sx, sy - 2.0 * H, 1.0 * sc, soft=0.3 * sc, macro=1.5 * sc,
+                        power=2.0, bias=0.5)
+        self.extra_rim += (mr * 0.2)[..., None] * np.array([0.35, 0.33, 0.6], F32)
         Wt[:] = np.maximum(Wt, cv2.GaussianBlur(WW, (0, 0), 1.5 * sc) * 1.1)
 
     def _susuki(self, D, Wt, gy):
@@ -1484,7 +1635,8 @@ class Summit:
 
         # hand-placed, uneven: a thick stand, a lone stalk, a pair, a gap ...
         groups = [(0.395, 4, 0.016), (0.452, 1, 0.0), (0.64, 3, 0.008), (0.705, 1, 0.0), (0.915, 2, 0.006),
-                  (0.968, 1, 0.0), (0.27, 1, 0.0)]
+                  (0.968, 1, 0.0), (0.27, 1, 0.0), (0.06, 2, 0.01), (0.19, 2, 0.008), (0.55, 2, 0.01),
+                  (0.8, 3, 0.012), (0.86, 1, 0.0)]
         for (gx, n, spr) in groups:
             for _ in range(n):
                 x = self.ox + (gx + rng.normal(0, spr)) * W
@@ -1634,7 +1786,7 @@ def near_band_plate(w, h, rows, sun, sc, seed=5, x_range=None, crown_col=(0.3, 0
 # ------------------------------------------------------------------------------------ far peak silhouettes
 def far_peak_plate(w, h, x0, x1, base_y, height, peaks, seed, sun, sc, col=(0.3, 0.28, 0.55),
                    lit=(0.42, 0.34, 0.58), haze_col=(0.72, 0.52, 0.66), rim_col=(1.9, 1.15, 0.6), rim_amt=1.0,
-                   fade=(0.35, 0.9), rough=0.18, aerial=0.0, face_blur=2.0):
+                   fade=(0.35, 0.9), rough=0.18, aerial=0.0, face_blur=2.0, face_fall=(0.2, 0.9), crest=None):
     """A distant mountain standing in the cloud sea, painted as a hazy blue-violet SILHOUETTE (yn_01):
     one flat value, only two broad planes (the flank turned toward the sun a touch lighter / warmer,
     split along the main ridge line), a thin warm rim on the sun-facing ridgelines, and a soft lost base
@@ -1643,10 +1795,52 @@ def far_peak_plate(w, h, x0, x1, base_y, height, peaks, seed, sun, sc, col=(0.3,
     prof = _ridge_profile(n, seed, peaks, rough=rough, expo=1.15, round_=0.08)
     top = base_y - prof * height
     xs = np.arange(n) + x0
+    if crest is not None:
+        # cloud-capped crest: cauliflower scallops along the ridge (rounded bumps, sharp notches)
+        rng_ = np.random.default_rng(seed + 500)
+        ph_, u_ = 0.0, np.zeros(n)
+        per = rng_.uniform(24, 46) * sc
+        amp = np.zeros(n)
+        a_ = rng_.uniform(3.0, 7.0) * sc
+        for i in range(n):
+            ph_ += math.pi / per
+            if ph_ >= math.pi:
+                ph_ -= math.pi
+                per = rng_.uniform(22, 48) * sc
+                a_ = rng_.uniform(3.0, 8.0) * sc
+            u_[i] = ph_
+            amp[i] = a_
+        # 2-3 big lobe groupings (broad cumulus domes with deep notches between them); the small
+        # scallops grow on the dome crowns and shrink in the notches (no even sawtooth)
+        ii = np.arange(n, dtype=np.float64)
+        ng = int(rng_.integers(3, 5))
+        cen = np.sort(rng_.uniform(0.12, 0.92, ng)) * n
+        dome = np.zeros(n)
+        for gc in cen:
+            wd = n * rng_.uniform(0.13, 0.22)
+            dome = np.maximum(dome, rng_.uniform(0.6, 1.0) * np.sqrt(np.clip(1 - ((ii - gc) / wd) ** 2, 0, 1)))
+        dome = dome * (0.3 + 0.7 * np.clip(prof / max(prof.max(), 1e-6) * 1.6, 0, 1))
+        top = top - dome * 0.2 * height
+        # medium cumulus lobes (50-130 px, rounded with sharp notches) carry the small scallops
+        ph3, per3, a3 = 0.0, rng_.uniform(50, 130) * sc, rng_.uniform(8, 20) * sc
+        lob = np.zeros(n)
+        for i in range(n):
+            ph3 += math.pi / per3
+            if ph3 >= math.pi:
+                ph3 -= math.pi
+                per3 = rng_.uniform(50, 130) * sc
+                a3 = rng_.uniform(8, 20) * sc
+            lob[i] = a3 * math.sin(ph3) ** 0.6
+        top = top - lob * (0.5 + 0.5 * dome)
+        top = top - amp * (0.3 + 0.5 * dome) * np.sqrt(np.abs(np.sin(u_)))
     pts = [(x0, base_y + 4)] + list(zip(xs, top)) + [(x1, base_y + 4)]
     m = poly_mask(w, h, pts)
     yy, xx = np.mgrid[0:h, 0:w].astype(F32)
     ttop = np.interp(xx[0], xs, top, left=base_y, right=base_y).astype(F32)[None, :]
+    # depth below the ridge measured from a SMOOTHED ridge line (the ridge's small jags must not print
+    # down the slope as vertical streaks in the haze / plane gradients)
+    ttop_s = cv2.GaussianBlur(ttop, (0, 0), 0.02 * w)
+    ttop = np.minimum(ttop, ttop_s) * 0.0 + ttop_s
     din = np.clip((yy - ttop) / max(height, 1), 0, 1.5)
     # the lit flank: the smoothed profile's slope facing the sun, carried down the fall line
     prw = np.interp(np.arange(w, dtype=F32), xs, prof, left=0, right=0).astype(F32)
@@ -1657,7 +1851,7 @@ def far_peak_plate(w, h, x0, x1, base_y, height, peaks, seed, sun, sc, col=(0.3,
     # the plane border wanders a little (painted, not ruled)
     face = cv2.GaussianBlur(face.astype(F32), (0, 0), face_blur * sc)
     base = np.asarray(col, F32)
-    c = base + (np.asarray(lit, F32) - base) * (face * 0.8 * (1 - ss(0.2, 0.9, din)))[..., None]
+    c = base + (np.asarray(lit, F32) - base) * (face * 0.8 * (1 - ss(face_fall[0], face_fall[1], din)))[..., None]
     # aerial perspective: lower slopes vanish into the cloud-top haze
     hz = ss(fade[0], fade[1], din)[..., None]
     c = c * (1 - hz * 0.85) + np.asarray(haze_col, F32) * hz * 0.85
@@ -1665,6 +1859,39 @@ def far_peak_plate(w, h, x0, x1, base_y, height, peaks, seed, sun, sc, col=(0.3,
         # aerial perspective: the whole silhouette sinks toward the horizon haze, most at its base
         ak = (aerial * (0.55 + 0.45 * ss(0.0, 0.8, din)))[..., None]
         c = c * (1 - ak) + np.asarray(haze_col, F32) * ak
+    if crest is not None:
+        # a crisp lit crest plane hanging under the scalloped ridge (a flat warm-lilac cap with a hard,
+        # scalloped terminator) + a hot hairline on the crest; light from up / toward the sun
+        traw = np.interp(xx[0], xs, top, left=base_y, right=base_y).astype(F32)[None, :]
+        dc = yy - traw
+        tv0 = np.gradient(cv2.GaussianBlur(traw, (0, 0), 3.0 * sc)[0])[None, :]
+        nz = fbm(w, h, max(w / (60 * sc), 3), seed + 501, 3, stretch=2.0)
+        ph2 = np.interp(xx[0], xs, np.abs(np.sin(u_)), left=0, right=0).astype(F32)[None, :]
+        bw = (crest.get('band', 16.0) * sc) * (0.55 + 0.45 * ph2 + 0.35 * nz) * (0.5 + 0.5 / np.sqrt(1.0 + 4.0 * tv0 * tv0))
+        tv = np.gradient(cv2.GaussianBlur(traw, (0, 0), 3.0 * sc)[0])[None, :]
+        # up- and sun-facing: flat tops and the slope turned to the sun (not the far flank)
+        fac = np.clip(1.0 / np.sqrt(1.0 + tv * tv) * 0.7 + (-tv * sdir) * 0.6, 0, 1)
+        plane_ = ss(bw + 1.2 * sc, bw - 0.8 * sc, dc) * ss(-1.0, 0.5, dc) * ss(0.25, 0.7, fac)
+        c = c + (np.asarray(crest.get('lit', (0.76, 0.54, 0.62)), F32) - c) * (plane_ * 0.0)[..., None]
+        # a WARM-WHITE lit crest band 6-15 px wide (wider on the lobe crowns), hot at the edge and melting
+        # softly down into the body (light, not a hairline). Distance to the silhouette (2D, no column
+        # drips) and the macro normal decide where it lands: up / sun-facing contours only.
+        dist = cv2.distanceTransform((m > 0.5).astype(np.uint8), cv2.DIST_L2, 5).astype(F32)
+        mb = cv2.GaussianBlur(m, (0, 0), 5.0 * sc)
+        gx_ = cv2.Sobel(mb, cv2.CV_32F, 1, 0, ksize=3)
+        gy_ = cv2.Sobel(mb, cv2.CV_32F, 0, 1, ksize=3)
+        gn_ = np.sqrt(gx_ * gx_ + gy_ * gy_) + 1e-6
+        lx_, ly_ = 0.55 * sdir, -1.0
+        ln_ = math.hypot(lx_, ly_)
+        fcn = np.clip((-gx_ * lx_ - gy_ * ly_) / gn_ / ln_, 0, 1)
+        fcn = cv2.GaussianBlur(fcn * ss(0.0, 0.01, gn_), (0, 0), 3.0 * sc)
+        fcn = np.clip(fcn / max(float(fcn.max()), 1e-3) * 1.6, 0, 1)
+        nz2 = fbm(w, h, max(w / (14 * sc), 3), seed + 502, 2)
+        bwh = (6.0 + 9.0 * np.clip(0.5 + 0.5 * nz, 0, 1)) * sc
+        kb_ = ss(bwh * 1.1, bwh * 0.3, dist + 1.5 * sc * nz2) * ss(0.25, 0.7, fcn)
+        kh_ = np.exp(-np.maximum(dist - 0.5, 0) / (2.0 * sc)) * ss(0.4, 0.85, fcn)
+        c = c + (np.asarray(crest.get('white', (1.05, 0.86, 0.8)), F32) - c) * (kb_ * 0.6)[..., None]
+        c = c + (np.asarray(crest.get('hot', (1.35, 1.1, 0.9)), F32) - c) * (kh_ * 0.55)[..., None]
     a = m * (1 - ss(fade[0] + 0.25, fade[1] + 0.35, din))
     rim = rim_light(m, sun[0], sun[1], 1.4 * sc, soft=0.45 * sc)
     rim = rim * (0.35 + 0.65 * face) * (1 - ss(0.0, 0.5, din))

@@ -40,10 +40,11 @@ PAN = 0.0
 PUSH = 0.0
 # eased crane-down + tilt: the shot opens framed on the sunset cumulus and sinks onto the road curve.
 # A point at inverse depth iz sits  (1 - e(t)) * (TILT_V + CRANE_K * iz)  px (at 1080p) lower than its
-# final position: sky / sea / islands ~130 px (pure tilt), the road mid-distance ~300 px, the pole / fence /
-# pampas ~600-800 px (crane parallax, ~2.5x the road and ~6x the sea).
-TILT_V = 170.0
-CRANE_K = 3000.0
+# final position: sky / sea / islands ~110 px (pure tilt), the road mid-distance ~170 px, the near pole ~300 px
+# and the pampas ~370 px (crane parallax ~3x the sea). Kept restrained so the lamp head always stays above
+# the sun disc and the sun / lighthouse remain the focal point.
+TILT_V = 110.0
+CRANE_K = 1000.0
 E_TOP = 0.45     # extra plate height above the frame (fraction of H) revealed at the start of the tilt
 NEAR_T = 0.8     # extra near-canvas height above the frame (fraction of H)
 Z_FAR = 350.0    # headland / lighthouse distance (m)
@@ -54,9 +55,10 @@ SUNSET = dict(hi=(1.0, 0.84, 0.62), lit=(1.0, 0.64, 0.4), lit_lo=(0.96, 0.5, 0.5
 
 
 def ease(x):
-    """quintic smootherstep: a slow start and a soft landing, most of the travel mid-shot."""
+    """slow start (quintic smootherstep) blended with an ease-in quadratic, so the move is still travelling
+    at ~30 % of its peak speed at the out-point (no dead stop before the cut)."""
     x = min(max(x, 0.0), 1.0)
-    return 0.75 * x * x * x * (x * (6 * x - 15) + 10) + 0.25 * x
+    return 0.75 * x * x * x * (x * (6 * x - 15) + 10) + 0.25 * x * x
 
 
 def cc(h):
@@ -420,7 +422,7 @@ class Scene:
         img = self.sample(self.sky_sun, pan, 1.0, 1.0, dy=vy)
         occ = None
         for pl, sp, is_occ in ((self.cirrus, 0.002, False), (self.far_sky, 0.0008, True),
-                               (self.cl_near, 0.0022, True)):
+                               (self.cl_near, 0.0036, True)):
             Ls = self.sample(pl, pan + sp * W * t, 1.0, 1.0, dy=vy)
             img = F.over_rgba(img, Ls)
             if is_occ:
@@ -482,7 +484,7 @@ class Scene:
         self.comp(img, d['hill'], d['iz_hill'], pan, Kt, ox, oy, rw['hill'], V=V)
         # the hillside crown on its own plate: gentle per-clump wind sway (secondary motion)
         self.comp(img, d['tree'], d['iz_tree'], pan, Kt, ox, oy, rw['tree'],
-                  sway=(d['tree_w'], dict(fn=self.sway_clusters, amp=4.0, freq=0.85)), t=t, V=V)
+                  sway=(d['tree_w'], dict(fn=self.sway_clusters, amp=6.5, freq=1.05)), t=t, V=V)
         self.comp(img, d['poles'], d['iz_poles'], pan, Kt, ox, oy, rw['poles'], V=V)
         WI.draw(img, self.landb.wires, pan, Kt, ox, oy, self.f, self.s, D=Dp, c=(W / 2.0, HZ * H), V=V)
         # specular glints travelling along the guardrail top / wires as they line up with the sun
@@ -512,9 +514,6 @@ class Scene:
         izp = 1.0 / NEAR.Z_POLE
         lpx, lpy = nb.lamp[0] - nb.mx + pan + Kt * izp, nb.lamp[1] - nb.T + vy + Ky * izp
         FX.add_glints(img, [lpx], [lpy], 0.01, 0.35, color=(1.0, 0.85, 0.6))
-        fgx = nb.fence_glint[0] - nb.mx + (0.5 - ease(t / DURATION)) * 0.12 * W + pan + Kt * izp
-        fgy = nb.fence_glint[1] - nb.T + vy + Ky * izp
-        FX.add_glints(img, [fgx], [fgy], 0.016, 0.55, color=(1.0, 0.88, 0.68))
         img += hal
         # drifting motes of light near the lens
         self.motes(img, t, dn, vy + Ky / NEAR.Z_GRASS)

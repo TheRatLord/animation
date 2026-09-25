@@ -38,7 +38,7 @@ class _P(Painter21):
             r = np.asarray(w['r'], np.float64) * self.k
             v = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(w['P'], axis=0), axis=1))])
             if len(P) > 3:
-                for _ in range(2):
+                for _ in range(2 if w['d'] == 0 else getattr(self, 'SMOOTH', 2)):
                     P[1:-1] = 0.25 * P[:-2] + 0.5 * P[1:-1] + 0.25 * P[2:]
             sl = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))])
             nd = int(max(len(P), sl[-1] / (1.5 * px)))
@@ -102,17 +102,18 @@ class _P(Painter21):
             # round 21: painted bark - one flat dark shadow side, a hard terminator, a hard lit edge
             # round 23: across-coordinate toward the sun (independent of how steeply the limb faces it) -> the
             # shadow side is a constant ~40% of the width, the lit band ~22%
-            nl_ = NX * Ls[0] + NY * Ls[1]
+            _up = getattr(self, 'WOOD_UP', 0.0)
+            nl_ = (NX * Ls[0] + NY * (Ls[1] - _up)) / math.hypot(Ls[0], Ls[1] - _up)
             fn = S * np.sign(nl_) * np.clip(np.abs(nl_) * 4.0, 0.0, 1.0)
             fct = fn + 0.06 * wob
             if not self.far:
                 sh = np.array([0.27, 0.25, 0.36], np.float32)      # flat cool grey-violet shadow side
                 mid = np.array([0.4, 0.35, 0.37], np.float32)      # grey-brown bark body
                 lit = np.array([0.78, 0.62, 0.48], np.float32)     # hard warm lit edge
-        m1 = _sstep((fct + (0.2 if hard else 0.4)) / (0.03 if hard else 0.2) + 0.5)
+        m1 = _sstep((fct + (0.2 if hard else 0.4)) / (getattr(self, 'TERM_W', 0.03) if hard else 0.2) + 0.5)
         col += (mid - sh) * m1[..., None]
         big = np.clip((RR - 2.0 * px) / (3 * px), 0, 1)
-        m2 = _sstep((fct - (0.55 if hard else 0.2)) / (0.025 if hard else 0.14) + 0.5) * big
+        m2 = _sstep((fct - (getattr(self, 'LIT_T', 0.55) if hard else 0.2)) / (0.025 if hard else 0.14) + 0.5) * big
         col += (lit - mid) * m2[..., None]
         # reflected cool sky light on the far shade edge
         cb = _sstep((-fct - 0.75) / 0.12 + 0.5) * np.clip((RR - 3 * px) / (4 * px), 0, 1)
@@ -146,7 +147,7 @@ class _P(Painter21):
             h3 = h3 - np.floor(h3)
             wq = (0.045 + 0.05 * h3)
             lx0, lx1 = 0.05 + 0.25 * h3, 0.45 + 0.5 * (1 - h3)
-            dash = _sstep((wq - np.abs(fq - 0.5)) / 0.025 + 0.5) * (h2 < 0.75) *                 _sstep((fa - lx0) / 0.03 + 0.5) * _sstep((lx1 - fa) / 0.03 + 0.5)
+            dash = _sstep((wq - np.abs(fq - 0.5)) / 0.025 + 0.5) * (h2 < 0.75 * getattr(self, 'LENT', 1.0)) *                 _sstep((fa - lx0) / 0.03 + 0.5) * _sstep((lx1 - fa) / 0.03 + 0.5)
             dash *= _sstep((0.97 - a_s) / 0.05 + 0.5)
             # a few long irregular bark cracks (wandering vertical lines, low frequency)
             fz = cv2.remap(bt, ((arc / 0.004 + RID * 23.0) % tw_).astype(np.float32),
@@ -167,12 +168,12 @@ class _P(Painter21):
             kdv = (kq - kj - 0.5) * ksp / 0.05
             kds = (S - kcx) / 0.16
             kd = np.sqrt(kdv * kdv + kds * kds)
-            knot = _sstep((1.0 - kd) / 0.15 + 0.5) * (hk < 0.45) * _sstep((0.8 - a_s) / 0.1 + 0.5)
+            knot = _sstep((1.0 - kd) / 0.15 + 0.5) * (hk < 0.45 * getattr(self, 'KNOT', 1.0)) * _sstep((0.8 - a_s) / 0.1 + 0.5)
             mark = np.clip(np.maximum(mark, knot * thick), 0, 1)
             dk_lit = np.array([0.22, 0.16, 0.19], np.float32)
             dk_sh = sh * 0.72
             dk = dk_sh + (dk_lit - dk_sh) * m1[..., None]
-            col += (dk - col) * (mark * 0.9)[..., None]
+            col += (dk - col) * (mark * getattr(self, 'MARK_A', 0.9))[..., None]
             # round 23: painted bark patches - pale grey-green lichen blotches and darker bark scabs on the
             # lit / mid side (the shadow side stays one flat value)
             pa = cv2.remap(bt, ((arc / 0.05 + RID * 13.0) % tw_).astype(np.float32),
@@ -374,8 +375,10 @@ class _P(Painter21):
         tw = np.clip(tw * 0.85, 0, 1)
         C = C * (1 - tw[..., None]) + self.wp['inner'] * tw[..., None]
         A = A + tw * (1 - A)
+        A_pre = A.copy()
         if stf_all:
             _splat(C, A, np.array([q[:17] for q in stf_all], np.float64))
+        Af_ = np.clip((A - A_pre) / np.maximum(1 - A_pre, 1e-3), 0, 1) if stf_all else np.zeros_like(A)
         if spr:
             _splat(C, A, np.array(spr, np.float64))
         C = C / np.maximum(A, 1e-4)[..., None]
@@ -383,6 +386,10 @@ class _P(Painter21):
         if getattr(self, 'BLOS_FULL', False):
             # round 21: wood crossing the blossom is not a silhouette (no rim / peach lines along every branch)
             blos = np.clip(A, 0, 1) * (1 - np.clip(wcov * (1 - Ab_) * 1.0, 0, 1))
+            if getattr(self, 'BLOS_NOWOOD', False):
+                # round 26: wood lying over back blossom is not blossom either (no cream rim / peach band on the
+                # limb -> no pale 'joint' segments where a limb crosses a clump)
+                blos = blos * (1 - np.clip(wcov * (1 - Af_), 0, 1))
         # ---- soft pink veil inside the crown gaps (lacy, but atmospheric, like cm5_01)
         hull = cv2.GaussianBlur(blos, (0, 0), 3.0 * px)
         veil = np.clip((hull - 0.25) / 0.4, 0, 1) * 0.05 * (1 - A)
@@ -494,7 +501,7 @@ class Tree23(Tree21):
         for i in range(1, nn):
             a = rng.normal(0, 2.4) + curl
             if i in kinks:
-                a += rng.choice([-1, 1]) * rng.uniform(6, 16)
+                a += rng.choice([-1, 1]) * rng.uniform(6, 16) * getattr(self, 'KINK', 1.0)
             dd = _rot(dd, a)
             u = i / (nn - 1)
             dd = _unit(dd + np.array([0.0, -g * u * 2.0]))

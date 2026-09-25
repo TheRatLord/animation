@@ -23,6 +23,8 @@ import s04_rain_street_detail as DT  # noqa: E402
 import s04_rain_street_layers as LY  # noqa: E402
 import s04_rain_street_v5 as V5     # noqa: E402
 import s04_rain_street_fin as FN    # noqa: E402
+import s04_rain_street_paint as PT  # noqa: E402
+import s04_rain_street_props as PR  # noqa: E402
 
 DURATION = 5.0
 hexc = A.hexc
@@ -35,7 +37,7 @@ SIGN_TEXT = {12.2: 'ラーメン', 9.0: '旅館', 17.2: '喫茶店', 20.5: 'カ�
              18.5: 'くすり'}
 ROAD_MARKING = False                # 止まれ is cut off by the frame bottom during the push-in: dropped
 CARD_Z = 60.0                       # signs nearer than this get their own card plate
-AMBIENT = np.array([0.050, 0.060, 0.115], np.float32)
+AMBIENT = np.array([0.048, 0.072, 0.076], np.float32)
 PUD_T = 0.625                       # puddle threshold on the puddle noise (lower = more standing water)
 R.MIRROR_K = 0.5                   # reflected heights squashed -> hanging signs land in frame, readable
 
@@ -126,8 +128,8 @@ class Scene:
         # fog colour field: brighter bluish-magenta glow toward the vanishing point
         xs, ys = cam.grid(1)
         d = np.sqrt(((xs - cam.pcx) / W) ** 2 + ((ys - cam.pcy) / H * 1.6) ** 2)
-        base = np.array([0.10, 0.10, 0.22], np.float32)
-        glow = np.array([0.34, 0.30, 0.52], np.float32)
+        base = np.array([0.075, 0.105, 0.112], np.float32)
+        glow = np.array([0.30, 0.37, 0.37], np.float32)
         self.fogcol = (base + glow * np.exp(-d / 0.18)[..., None] * 0.95).astype(np.float32)
         fog = (self.fogcol, 38.0, 0.95, 12.0, 0.7)
         dof = (FOCUS, 10.0 * W / 1920.0)
@@ -144,6 +146,8 @@ class Scene:
         self._paint_wires(cv, (30.0, 1e9))
         self._paint_traffic(cv)
         self._paint_cones(cv, lambda z: z >= 30.0)
+        PT.grime(cv, strength=0.8, seed=10)
+        PT.neon_spill(cv, PT.spill_light(PT.spill_accum(None, cv), W), amt=0.35)
         self._mist_bands(cv)
         planes.append(R.bake(cv, self.lights, AMBIENT, fog=fog, dof=dof, name='far', glow=gl))
         del cv
@@ -158,14 +162,15 @@ class Scene:
             zr = c.z / np.maximum(c.a, 1e-6)
             occ[m] = np.minimum(occ[m], zr[m])
         acc_occ(cv)
-        planes.append(R.bake(cv, self.lights, AMBIENT, fog=fog, dof=dof_n, name='near', glow=gl))
-        del cv
+        cv_near = cv
+        spill = PT.spill_accum(None, cv_near)
         # signs + standees: one cropped single-depth card each (clean parallax, no glyph smearing)
         cards = []
         for sg in [s_ for s_ in self.signs if s_[1] < CARD_Z]:
             cv = R.Canvas(cam)
             self._paint_signs(cv, lambda s_, sg=sg: s_ is sg)
             acc_occ(cv)
+            spill = PT.spill_accum(spill, cv)
             c = LY.bake_card(cv, self.lights, AMBIENT, fog=fog, dof=None, glow=gl, name='sign%.1f' % sg[1])
             if c is not None:
                 c.zkey = sg[1]
@@ -190,6 +195,25 @@ class Scene:
                     c.zkey = b['z0'] + 0.3
                     cards.append(c)
                 del cv
+        # near walls: painted grime + stains, then the neon halation of every near sign spilling onto them
+        spl = PT.spill_light(spill, W)
+        self._spill = spl
+        PT.grime(cv_near, strength=1.0, seed=20, spec_light=spl, emi_comp=0.35)
+        PT.neon_spill(cv_near, spl, amt=0.55)
+        planes.insert(1, R.bake(cv_near, self.lights, AMBIENT, fog=fog, dof=dof_n, name='near', glow=gl))
+        del cv_near
+        # alley clutter (bin, crates, cones, bicycle): one card each
+        for k, (fn, zk) in enumerate(PR.PROPS):
+            cv = R.Canvas(cam)
+            fn(self, cv)
+            acc_occ(cv)
+            PT.grime(cv, strength=0.8, seed=50 + k, spec_light=spl)
+            PT.neon_spill(cv, spl, amt=0.4)
+            c = LY.bake_card(cv, self.lights, AMBIENT, fog=fog, dof=None, glow=gl, name='prop%d' % k)
+            if c is not None:
+                c.zkey = zk
+                cards.append(c)
+            del cv
         cards.sort(key=lambda c: -c.zkey)
         self.cards = cards
         self.card_mirror = LY.merge_mirrors(cards, cam)
@@ -200,6 +224,8 @@ class Scene:
         self._paint_lanterns(cv)
         self._paint_cones(cv, lambda z: z < 30.0)
         acc_occ(cv)
+        PT.grime(cv, strength=0.9, seed=30, spec_light=spl)
+        PT.neon_spill(cv, spl, amt=0.45)
         planes.append(R.bake(cv, self.lights, AMBIENT, fog=fog, dof=dof_n, name='objects', glow=gl))
         del cv
         for p in planes:
@@ -257,7 +283,7 @@ class Scene:
                 np.exp(-((Y - 17.0) / 2.0) ** 2) * 0.45)
         band *= np.clip((n2 - 0.35) * 2.2, 0, 1) * (0.6 + 0.6 * n)
         dist = np.clip((zr - 30.0) / 60.0, 0, 1)
-        col = np.array([0.30, 0.26, 0.46], np.float32)
+        col = np.array([0.27, 0.33, 0.33], np.float32)
         m = (band * dist * 0.22)[..., None] * col
         cv.emi += m * (1.0 - 0.6 * a[..., None])
 
@@ -302,54 +328,41 @@ class Scene:
 
     # ------------------------------------------------------------------------- sky
     def _sky(self):
-        """Rain-night ceiling over the city: a low, structured nimbostratus deck lit from below by the
-        city (pink-magenta undersides, violet bodies), darker gaps showing the deep navy upper sky, and ragged
-        scud with crisp lit lower edges. Plate is wider than the frame so it can drift."""
+        """Rain-night ceiling (wwy_11/12): a low, featureless-but-mottled grey-teal overcast lit faintly from
+        below by the city. Everything is a smooth float ramp (no thresholded lobes, no discs or rings):
+        a monotonic vertical gradient, very soft low-contrast cloud mottling stretched horizontally, and a
+        broad city-glow that only rises toward the horizon. Plate is wider than the frame so it can drift."""
         cam = self.cam
         PW, PH = cam.PW + int(0.08 * cam.W), cam.PH
         hz = cam.pcy / PH
-        preset = dict(stops=[(0.0, '#080a26'), (0.2, '#141848'), (0.4, '#2a2468'), (0.58, '#553c8a'),
-                             (0.78, '#9a5aa0'), (1.0, '#e08ab8')],
-                      sun_glow='#ffb0c0', sun_glow_amt=0.1, below='#d890b8', band=('#e8a8c8', 0.35))
-        sky = S.sky_gradient(PW, PH, preset, horizon=hz, variation=0.03, seed=4)
         ys = np.linspace(0, 1, PH, dtype=np.float32)[:, None]
-        lit = np.clip(ys / hz, 0, 1) ** 1.2
-        # deck: horizontally stretched billows; defined lobes via thresholded fbm with warped edges
+        xs = np.linspace(0, 1, PW, dtype=np.float32)[None, :]
+        u = np.clip(ys / hz, 0, 1)                       # 0 top -> 1 horizon (monotonic)
+        top, mid, hor = hexc('#0c1418'), hexc('#223036'), hexc('#52625f')
+        k1 = C.smoothstep(0.0, 0.75, u)[..., None]
+        k2 = C.smoothstep(0.45, 1.0, u)[..., None]
+        out = top * (1 - k1) + mid * k1
+        out = out * (1 - k2) + hor * k2
+        out = np.broadcast_to(out, (PH, PW, 3)).copy()
+
         def field(seed, sx, sy, oct_):
             f = C.fbm(max(PW // sx, 8), max(PH // sy, 8), 4.0, oct_, seed=seed)
             return cv2.resize(f, (PW, PH), interpolation=cv2.INTER_CUBIC)
-        base = field(41, 7, 2, 5)
-        det = field(42, 2, 1, 4)
-        v = base * 0.78 + det * 0.22
-        dens = C.smoothstep(0.47, 0.53, v)
-        # underside light: distance to the lower edge of each lobe (city glow hits the bottom)
-        sh = max(2, int(PH * 0.012))
-        below = np.vstack([dens[sh:], np.repeat(dens[-1:], sh, 0)])
-        under = np.clip(dens - below, 0, 1)
-        under = cv2.GaussianBlur(under, (0, 0), PH * 0.004) * 0.9
-        sh2 = max(3, int(PH * 0.06))
-        below2 = np.vstack([dens[sh2:], np.repeat(dens[-1:], sh2, 0)])
-        broad = cv2.GaussianBlur(np.clip(dens - below2, 0, 1), (0, 0), PH * 0.025) * 1.4
-        under = under * 0.5 + broad
-        inner = cv2.GaussianBlur(dens, (0, 0), PH * 0.02)
-        body = hexc('#4a3478') * (0.65 + 1.0 * lit[..., None]) * (0.75 + 0.35 * det[..., None])
-        body = body + hexc('#b0609a') * (0.35 * lit * np.clip(1 - inner, 0, 1) ** 0.5)[..., None]
-        gap = sky * 0.8
-        out = gap * (1 - dens[..., None]) + body * dens[..., None]
-        out = out + hexc('#ff9ad0') * (np.clip(under, 0, 1) * (0.25 + 0.75 * lit))[..., None] * 0.55
-        # ragged scud below the deck: darker, crisp, stretched fragments with bright lower rims
-        sc = field(43, 9, 2, 6)
-        d2 = C.smoothstep(0.6, 0.64, sc * 0.85 + det * 0.15) * np.clip(1.25 - ys / hz, 0, 1)
-        b2 = np.vstack([d2[sh:], np.repeat(d2[-1:], sh, 0)])
-        rim = cv2.GaussianBlur(np.clip(d2 - b2, 0, 1), (0, 0), 1.0)
-        out = out * (1 - 0.8 * d2[..., None]) + hexc('#1c1840') * (0.8 + 0.6 * lit[..., None]) * 0.8 * d2[..., None]
-        out = out + hexc('#ffb0d8') * (rim * (0.3 + 0.7 * lit))[..., None] * 0.3
-        # city light pollution glow rising from the street canyon
-        xs = np.linspace(0, 1, PW, dtype=np.float32)[None, :]
+        # soft mottled cloud base: low-contrast, horizontally stretched, heavily blurred (no hard edges)
+        m1 = cv2.GaussianBlur(field(41, 8, 3, 4), (0, 0), PH * 0.01)
+        m2 = cv2.GaussianBlur(field(42, 3, 1, 3), (0, 0), PH * 0.004)
+        mott = (m1 - 0.5) * 0.9 + (m2 - 0.5) * 0.35
+        out *= (1.0 + mott * (0.35 + 0.25 * u))[..., None]
+        # faint lit undersides of the cloud base (city light from below), smooth
+        lit = np.clip(mott * 2.0, 0, 1) * u ** 2
+        out += hexc('#56666a') * (lit * 0.12)[..., None]
+        # city light pollution: broad, monotonic in y (grows toward the horizon), centred on the street slot
         cx = cam.pcx / PW
-        glow = np.exp(-((xs - cx) / 0.18) ** 2) * lit ** 2
-        out = out + hexc('#c070b0') * (glow * 0.45)[..., None]
-        return out.astype(np.float32)
+        gx = np.exp(-((xs - cx) / 0.22) ** 2)
+        gy = u ** 3
+        out += hexc('#6a7a74') * (gx * gy * 0.45)[..., None]
+        out += hexc('#8a7a68') * (np.exp(-((xs - cx) / 0.1) ** 2) * u ** 6 * 0.12)[..., None]
+        return np.ascontiguousarray(out, dtype=np.float32)
 
     # ------------------------------------------------------------------------- buildings
     def _paint_buildings(self, cv, pred):
@@ -367,7 +380,7 @@ class Scene:
                          near=z0 < 1.0, spandrel=z0 < 28.0)
             if z0 < 1.0:
                 # the nearest walls frame the shot: keep them dark and cool (night, wet) so the neon reads
-                T['alb'] = (T['alb'] * np.array([0.6, 0.56, 0.84], np.float32)).astype(np.float32)
+                T['alb'] = (T['alb'] * np.array([0.6, 0.66, 0.68], np.float32)).astype(np.float32)
             if side < 0:
                 P = [(xf, hh, z0), (xf, hh, z1), (xf, 0, z1), (xf, 0, z0)]
                 n = (1, 0, 0)
@@ -725,10 +738,15 @@ class Scene:
                 lx = X - np.sign(X) * 1.0
                 Ta = A.tex(1.1 * ppm, max(2, 0.06 * ppm), hexc('#3a3c44'))
                 cv.sprite((X + lx) / 2, 5.75, Z - 0.1, 1.1, 0.06, Ta['alb'], Ta['a'], None)
-                Th = A.tex(0.5 * ppm, max(2, 0.14 * ppm), hexc('#50545e'))
+                # small cobra-head housing; only a soft oval LED lens underneath glows (no white bar)
+                Th = A.tex(0.42 * ppm, max(3, 0.12 * ppm), hexc('#3a3e46'))
                 hp, wp = Th['a'].shape
-                A.rect(Th['emi'], 0, hp * 0.55, wp, hp, hexc('#e0f0ff') * 6.0)
-                cv.sprite(lx, 5.62, Z - 0.12, 0.5, 0.14, Th['alb'], Th['a'], Th['emi'])
+                yy_, xx_ = np.mgrid[0:hp, 0:wp].astype(np.float32)
+                ov = np.exp(-(((xx_ - wp * 0.5) / (wp * 0.2)) ** 2 + ((yy_ - hp * 0.85) / (hp * 0.28)) ** 2) * 2.0)
+                Th['a'] *= np.clip(1.0 - np.abs(xx_ / max(wp - 1, 1) - 0.5) * 2.0 * (yy_ / hp) * 0.6, 0, 1)
+                # (the Z~22 lamp sits in front of a far sign: keep its lens dim so it does not cut a glyph)
+                Th['emi'][:] = hexc('#e0f0ff')[None, None, :] * (ov * (0.9 if 20 < Z < 25 else 3.0))[..., None]
+                cv.sprite(lx, 5.62, Z - 0.12, 0.42, 0.12, Th['alb'], Th['a'], Th['emi'])
 
     def _wire_segments(self):
         """Overhead lines as drooping catenary BUNDLES strung pole-to-pole along each kerb, and across the street
@@ -1136,6 +1154,29 @@ class Scene:
         # grates along the gutters
         gr = gut & ((Z % 7.0) < 0.6)
         alb[gr] = hexc('#15161a')
+        # asphalt repair patches (fresh = darker, old = lighter/greyer) and a web of sealed cracks (wwy_12 floor)
+        prng = np.random.default_rng(77)
+        patch_m = np.zeros(X.shape, np.float32)
+        for _ in range(16):
+            px0 = prng.uniform(ROAD_L - 0.2, ROAD_R - 1.0)
+            pz0 = prng.uniform(2.5, 60.0)
+            pw_, pl_ = prng.uniform(0.6, 2.2), prng.uniform(0.8, 4.0) * (1 + pz0 / 40)
+            if X_CROSS0 - 1 < pz0 < X_CROSS1 and prng.random() < 0.5:
+                continue
+            e_ = self._world_noise(X, Z, 3.0, 3.0, seed=41) * 0.12
+            m_ = ((X > px0 - e_) & (X < px0 + pw_ + e_) & (Z > pz0 - e_) & (Z < pz0 + pl_ + e_)).astype(np.float32)
+            v_ = prng.choice([0.72, 0.8, 1.25, 1.35])
+            alb *= (1 + (v_ - 1) * m_ * (1 - paint))[..., None]
+            patch_m = np.maximum(patch_m, m_ * (0.6 if v_ < 1 else 1.0))
+        cn = self._world_noise(X, Z, 1.1, 0.8, seed=43)
+        cn2 = self._world_noise(X, Z, 2.3, 1.7, seed=44)
+        ridge = 1.0 - np.abs(cn * 2 - 1)
+        ridge2 = 1.0 - np.abs(cn2 * 2 - 1)
+        cfade = np.clip(9.0 / np.maximum(Z, 1.0), 0, 1)
+        crack = (C.smoothstep(0.97, 0.99, ridge) + 0.6 * C.smoothstep(0.975, 0.992, ridge2)) * cfade * (1 - paint)
+        crack = np.clip(crack, 0, 1)
+        alb *= (1 - 0.32 * crack)[..., None]
+        self._gnd_patch = (patch_m, crack)
         # wet darkening (paint keeps more of its value)
         alb *= (0.62 + 0.4 * paint)[..., None]
         alpha = below.astype(np.float32)
@@ -1183,9 +1224,20 @@ class Scene:
         dn = self._world_noise(X, Z, 0.42, 0.16, seed=31) * 0.75 + self._world_noise(X, Z, 1.4, 0.8, seed=32) * 0.25
         dry = C.smoothstep(0.5, 0.64, dn) * (1 - puddle) * (1 - 0.6 * np.exp(-((X - ROAD_L) / 0.6) ** 2)
                                                              - 0.6 * np.exp(-((X - ROAD_R) / 0.6) ** 2))
+        # repair patches drain / dry first (dull, only smeared reflections); the gutters carry a sheet of
+        # running water (bright mirror band along both kerbs, broken by flow streaks)
+        patch_m, crack = self._gnd_patch
+        del self._gnd_patch
+        dry = np.maximum(dry, patch_m * 0.75 * (1 - puddle))
+        flow = self._world_noise(X, Z, 5.0, 0.25, seed=45)
+        sheet = (np.exp(-((X - (ROAD_L + 0.12)) / 0.2) ** 2) + np.exp(-((X - (ROAD_R - 0.12)) / 0.2) ** 2))
+        sheet = np.clip(sheet * (0.55 + 0.6 * flow), 0, 1) * below * (Z < 120)
+        puddle = np.maximum(puddle, sheet * 0.9)
+        dry *= (1 - sheet)
         dry = np.clip(dry, 0, 1)
         # crisp mirror on the wet film: strong everywhere (anime wet-road look), a little less on paint
         rcr = np.clip(0.3 + 0.75 * Fr, 0, 0.92) * (0.72 + 0.28 * smod) * (1 - 0.4 * paintmask)
+        rcr = rcr * (1 - 0.45 * patch_m) * (1 - 0.5 * crack)
         ex = np.dstack([puddle, refl * below, refl_p * below, brk * below, dry * below,
                         rcr * below]).astype(np.float32)
         ex = cv2.resize(ex, (cam.PW, cam.PH), interpolation=cv2.INTER_AREA)
@@ -1389,7 +1441,10 @@ class Scene:
         ddx, ddy = dd[..., 0], dd[..., 1]
         sharp = cv2.remap(refl, mx + ddx, self._gy + ddy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
         # wet film: the same crisp mirror with a slight vertical softening (water film, not glass)
-        soft = cv2.GaussianBlur(sharp, (0, 0), sigmaX=0.35 * W / 1920, sigmaY=1.6 * H / 1080)
+        # broken into vertical brush strokes (no crisp mirrored lettering); puddles keep a little more bite
+        sm = PT.brush_smear(self, sharp)
+        soft = cv2.GaussianBlur(sm, (0, 0), sigmaX=0.35 * W / 1920, sigmaY=1.6 * H / 1080)
+        sharp = sharp * 0.12 + sm * 0.88
         # dry-ish patches: vertically smeared reflections
         s2 = cv2.resize(refl, (W2, H2), interpolation=cv2.INTER_AREA)
         b1 = cv2.GaussianBlur(s2, (0, 0), sigmaX=0.5, sigmaY=0.0055 * H)
@@ -1423,8 +1478,7 @@ class Scene:
                 fk, fw = fig_state(t)
                 if self.fig_cards[fk] is not None:
                     LY.over_card(img, self.fig_cards[fk], cam, dX, dY, dZ - fw)
-        self._vtop_splashes(img, t, dX, dY, dZ)
-        V5.splashes(self, img, t, dX, dY, dZ)
+        # (splash crowns now only on the ground/puddles: vending-top and sign-top crowns read as floating)
         V5.foot_splashes(self, img, t, dX, dY, dZ, FIG_X, FIG_Z, FIG_SPEED, FIG_CYCLE)
         self._draw_bokeh(img, dX, dY, dZ)
         FN.vp_tame(self, img)
@@ -1437,7 +1491,7 @@ class Scene:
         img = self._rain(img, t)
         # ---- post
         img = F.shoulder(img, 0.78, 0.3)
-        R.grade(img, 1.12, np.array([0.0, 0.012, 0.035], np.float32), 1.06)
+        R.grade(img, 1.12, np.array([0.010, 0.026, 0.028], np.float32), 1.0)
         img = F.finish_fast(img, 0.0, exposure=1.0, sat=1.12, grain_amt=0.0, vig=0.35, ca=0.0012)
         img *= self._paper()
         return img

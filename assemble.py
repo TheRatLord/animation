@@ -78,14 +78,27 @@ BAR = 4 * BEAT               # 2.5 s
 #   still lands on the billboard) so s03 cuts in on the bar-7 downbeat.
 #   Transition anchors re-measured: s05 sun, s09 window sun, s07 comet head, s08 lamp head, s10 sun.
 #   s04 and s08 (both slow leftward trucks) stay separated by the s07 comet chorus.
+# Round-8 (re-rendered s01/s04/s05/s06/s07/s10): windows re-picked by motion scan (per-frame MAD + phase-corr
+#   shift at 480x270) + contact sheets.  s01 is now 132 frames: 12-132 holds the whole ease-in/ease-out crane
+#   (0-12 is static and was only under the fade-in).  s05 22-97 is the peak of its crane (the sun stays in frame,
+#   glare-out re-measured on frame 96).  s04 31-91 (peak), s06 15-120 and s07 6-126 unchanged (still the peaks),
+#   s10 0-144 (forced: the finale + fade needs all 144 frames).  Anchors re-measured: s05 sun, s04 red neon,
+#   s07 comet head, s10 sun (in / end).
+# Round-9 (re-rendered s01/s04/s05/s06/s07/s10): windows re-checked by the same motion scan -- all unchanged, each
+#   is still the peak window of its render: s01 12-132 (0-12 static; the crane now keeps drifting to the cut, tail
+#   MAD ~1.7, no dead hold), s04 31-91 (best 60-frame MAD 5.5), s05 22-97 (best 75), s06 15-120 (best 105),
+#   s07 6-126 (best 120), s10 0-144 (forced).  Anchors re-measured on the new renders: s05 sun 0.170/0.295 (frame 96),
+#   s07 comet head 0.629/0.627 (frame 6), s10 sun 0.615/0.394 (frame 0) -> 0.615/0.372 (frame 119) -- only the glare-out
+#   centre moved.  The encode goes to montage.tmp.mp4 and replaces montage.mp4 only after ffmpeg exits 0 AND the temp
+#   file probes to the expected frame count.
 EDL = [
-    ('s01_summer_sky',        0, 8, ('fadein', 16)),          # HERO  crane-up from the rooftops to the cumulus tower, 5.0 s
+    ('s01_summer_sky',       12, 8, ('fadein', 16)),          # HERO  crane-up from the rooftops to the cumulus tower, 5.0 s
     ('s02_railway_crossing', 12, 4, ('cut',)),                # barrier arm coming down
-    ('s05_sakura',           45, 5, ('cut',)),                # crane-up through the blossom that ends on sky + sun
+    ('s05_sakura',           22, 5, ('cut',)),                # peak of the crane-up through the blossom, sun top-left
     ('s09_classroom',        30, 4, ('glare', 7, 10)),        # sakura sun glare -> window sun (match cut, capped ~70%)
     ('s06_seaside',          15, 7, ('cut',)),                # sunset road by the sea (7 beats: the longest non-hero hold)
     ('s03_city_dusk',        66, 4, ('cut',)),                # dusk skyline truck, ends on the billboard (cut on bar 7)
-    ('s04_rain_street',      36, 4, ('cut',)),                # neon rain push (its peak-motion 4 beats)
+    ('s04_rain_street',      31, 4, ('cut',)),               # neon rain push (its peak-motion 4 beats)
     ('s07_comet_night',       6, 8, ('flash', 3, 5)),         # HERO  comet, chorus downbeat - local additive bloom pop
     ('s08_snow_station',     36, 4, ('cut',)),                # post-chorus breath; lamp light carries into the dawn
     ('s10_sea_of_clouds',     0, 8, ('leak', 5, 12)),         # HERO  finale: hard cut on the downbeat, local warm leak
@@ -100,19 +113,20 @@ END_PAD = 17            # black while the reverb rings out (total length unchang
 S10_SRC_FRAMES = 144
 
 # glare centres (normalised x, y-of-height) for the s05 -> s09 match cut: sakura sun / window sun
-GLARE_OUT = (0.170, 0.312)     # s05 sun (measured on the round-6 render, frame 119)
+GLARE_OUT = (0.170, 0.295)     # s05 sun (measured on the round-9 render, frame 96 = last frame of the window)
 GLARE_IN = (0.426, 0.239)      # s09 window sun at its in-point
 GLARE_CAP = 0.70        # max white contribution of the glare
 
 # s08 lamp head (x, y-of-height) at the end of its window, and the s10 sun, for the dawn leak
 LAMP_POS = (0.572, 0.070)   # measured on the round-7 s08 render, frame 95
-S10_SUN = (0.615, 0.393)  # sun at the s10 in-point (measured on the round-7 render)
-S10_SUN_END = (0.615, 0.368)  # the sun has climbed by the end of the s10 window
+S10_SUN = (0.615, 0.395)  # sun at the s10 in-point (measured on the round-8 render, frame 0)
+S10_SUN_END = (0.615, 0.372)  # the sun has climbed by the end of the s10 window (frame 119: 0.374, 143: 0.369)
 LEAK_MAX = 0.20         # max additive value of the s10 leak
 
-# s04 -> s07 pop sources (x, y-of-height): the red ramen neon in s04, the comet head in s07
-SIGN_POS = (0.355, 0.30)
-COMET_POS = (0.630, 0.625)
+# s04 -> s07 pop sources (x, y-of-height): the brightest red neon in s04 (round-8 render, frame 90),
+# the comet head in s07 (round-8 render, frame 6)
+SIGN_POS = (0.413, 0.297)
+COMET_POS = (0.629, 0.626)
 POP_MAX = 0.50          # cap of the additive pop glow
 
 
@@ -127,6 +141,23 @@ def timeline():
     last_src = EDL[-1][1] + (content - starts[-1]) + END_HOLD + END_BLACK
     assert last_src <= S10_SRC_FRAMES, 's10 window runs past the end of the render'
     return starts, content, total
+
+
+def probe_frames(path):
+    """Decoded video frame count of a file (ffprobe -count_frames)."""
+    out = subprocess.run(['ffprobe', '-v', 'error', '-count_frames', '-select_streams', 'v:0',
+                          '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', path],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    return int(out.split(',')[0])
+
+
+def check_windows(starts, content):
+    """Every source window must lie inside its render (s10 also feeds the post-content fade)."""
+    for i, (sid, src_in, beats, _) in enumerate(EDL):
+        need = src_in + beats * FPB + (END_HOLD + END_BLACK if i == len(EDL) - 1 else 0)
+        have = probe_frames(os.path.join(SHOTS, sid + '.mp4'))
+        if need > have:
+            raise RuntimeError(f'{sid}: window {src_in}-{need} runs past the render ({have} frames)')
 
 
 # ----------------------------------------------------------------------------- score
@@ -817,6 +848,11 @@ def build_video(starts, content, total, frames_only=None):
         src.close()
         print('wrote', len(frames_only), 'preview frames to', outdir)
         return
+    # Encode to a temp file next to OUT and only replace OUT once the encode fully succeeded and the
+    # result has the expected frame count (an aborted run must never leave a truncated montage.mp4).
+    tmp = OUT[:-4] + '.tmp.mp4'
+    if os.path.exists(tmp):
+        os.remove(tmp)
     enc = subprocess.Popen(
         ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
          '-f', 'rawvideo', '-pix_fmt', 'yuv420p', '-s', f'{W}x{H}', '-r', str(FPS),
@@ -828,19 +864,32 @@ def build_video(starts, content, total, frames_only=None):
          '-pix_fmt', 'yuv420p', '-r', str(FPS), '-g', '48',
          '-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
          '-c:a', 'aac', '-b:a', '256k', '-ar', '48000',
-         '-t', f'{total / FPS:.4f}', '-movflags', '+faststart', OUT],
+         '-t', f'{total / FPS:.4f}', '-movflags', '+faststart', '-f', 'mp4', tmp],
         stdin=subprocess.PIPE)
-    for f in range(total):
-        i = max(j for j, s in enumerate(starts) if s <= f)
-        src.release_before(i - 1)
-        img = compose(src, f, starts, content)
-        enc.stdin.write(to_yuv420(img, np.random.default_rng(1000 + f)))
-        if f % 48 == 0:
-            print(f'  frame {f}/{total}', flush=True)
-    src.close()
-    enc.stdin.close()
-    if enc.wait() != 0:
-        raise RuntimeError('ffmpeg encode failed')
+    try:
+        for f in range(total):
+            i = max(j for j, s in enumerate(starts) if s <= f)
+            src.release_before(i - 1)
+            img = compose(src, f, starts, content)
+            enc.stdin.write(to_yuv420(img, np.random.default_rng(1000 + f)))
+            if f % 48 == 0:
+                print(f'  frame {f}/{total}', flush=True)
+        enc.stdin.close()
+        if enc.wait() != 0:
+            raise RuntimeError('ffmpeg encode failed')
+        got = probe_frames(tmp)
+        if got != total:
+            raise RuntimeError(f'encoded {got} frames, expected {total}')
+    except BaseException:
+        enc.kill()
+        enc.wait()
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        print('encode failed -- left', OUT, 'untouched')
+        raise
+    finally:
+        src.close()
+    os.replace(tmp, OUT)
 
 
 def edl_report(starts, content):
@@ -867,6 +916,7 @@ def main():
     if '--score' in sys.argv:
         return
     ensure_shots()
+    check_windows(starts, content)
     build_video(starts, content, total)
     print('wrote', OUT)
 

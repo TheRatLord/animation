@@ -22,8 +22,8 @@ def _vp_setup(sc):
     spill = np.exp(-d2 * 1.6)
     # magenta on the left / centre, cool cyan toward the conbini on the right
     side = np.clip((xx - vx) / (0.12 * W) * 0.5 + 0.5, 0, 1)
-    mag = np.float32([1.08, 0.80, 1.12])
-    cya = np.float32([0.78, 1.00, 1.10])
+    mag = np.float32([1.03, 0.98, 0.98])
+    cya = np.float32([0.92, 1.00, 1.02])
     tint = mag * (1 - side[..., None]) + cya * side[..., None]
     sc._vpm = (np.maximum(core, spill * 0.8)[..., None].astype(np.float32), tint.astype(np.float32))
 

@@ -198,10 +198,10 @@ def window_tex(rng, w, h, kind, frame_col=(0.25, 0.26, 0.3)):
         # dark pane mirroring the city-lit rain sky: pink-violet glow at the top fading to deep navy,
         # a crisp diagonal sheen band and a thin lit sill edge
         xx = np.linspace(0, 1, w, dtype=np.float32)[None, :, None]
-        sky = hexc('#7a4a98') * (1 - yy) ** 1.6 + hexc('#1a2244') * (0.6 + 0.4 * yy)
+        sky = hexc('#5a6e70') * (1 - yy) ** 1.6 + hexc('#16222a') * (0.6 + 0.4 * yy)
         glass = sky * rng.uniform(0.75, 1.1)
-        glass = glass + hexc('#e0a0d8') * 0.18 * np.exp(-((xx - 0.25 - 0.45 * yy) / 0.06) ** 2)
-        glass = glass + hexc('#c8a0e8') * 0.08 * np.exp(-((xx - 0.62 - 0.45 * yy) / 0.025) ** 2)
+        glass = glass + hexc('#c8d8d8') * 0.18 * np.exp(-((xx - 0.25 - 0.45 * yy) / 0.06) ** 2)
+        glass = glass + hexc('#b8ccd0') * 0.08 * np.exp(-((xx - 0.62 - 0.45 * yy) / 0.025) ** 2)
         E = glass * 0.3
     else:
         if kind == 'warm':
@@ -244,7 +244,7 @@ def facade(rng, wm, hm, ppm, style, floors=None, ground='shutter', wall=None, li
     if wall is None:
         wall = hexc(rng.choice(['#5a5560', '#6a6258', '#4c5260', '#70645c', '#3e4454', '#5e5a66', '#7a6e66']))
     # night rain: lift every wall toward a rich deep blue-violet instead of neutral grey mud
-    wall = np.asarray(wall, np.float32) * 0.72 + hexc('#4a3f78') * 0.28
+    wall = np.asarray(wall, np.float32) * 0.72 + hexc('#3c4c4e') * 0.28
     T = tex(w, h, wall)
     A = T['alb']
     E = T['emi']
@@ -405,10 +405,10 @@ def facade(rng, wm, hm, ppm, style, floors=None, ground='shutter', wall=None, li
         st2 = cv2.GaussianBlur(st2, (0, 0), max(0.6, P(0.03)), max(0.6, P(0.2)))
         A *= (1 - 0.32 * st2)[..., None]
         # the wet streaks also carry a faint sheen of the neon
-        E += hexc('#7a5ab0') * (st2 * 0.05)[..., None]
+        E += hexc('#6a8a8c') * (st2 * 0.05)[..., None]
     # ambient neon bounce from the street canyon: keeps the darks a luminous blue-violet
     yy_ = np.linspace(0, 1, h, dtype=np.float32)[:, None, None]
-    E += A * (hexc('#6c50b0') * (0.10 + 0.08 * yy_))
+    E += A * (hexc('#4e6c70') * (0.10 + 0.08 * yy_))
     # parapet top
     rect(A, 0, 0, w, P(0.35), A[int(P(0.6)), w // 2] * 1.25)
     T['alb'] = np.clip(A, 0, 1)

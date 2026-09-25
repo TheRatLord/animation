@@ -56,7 +56,7 @@ class SunFlare:
         Rw = int(0.36 * w)
         bx0, bx1 = int(max(x0 - Rw, 0)), int(min(x0 + Rw, w))
         by0, by1 = int(max(y0 - Rw, 0)), int(min(y0 + Rw, h))
-        if bx1 > bx0 and by1 > by0:
+        if bx1 > bx0 and by1 > by0 and not getattr(self, 'no_star', False):
             ys, xs = np.mgrid[by0:by1, bx0:bx1].astype(np.float32)
             dx, dy = xs - x0, ys - y0
             d = np.sqrt(dx * dx + dy * dy) + 1e-3
@@ -116,7 +116,7 @@ class SunFlare:
             out[gy0:gy1, gx0:gx1] += (body * np.asarray(col, np.float32) * op).astype(np.float32)
         # anamorphic streak (subtle)
         sy0, sy1 = int(max(y0 - 0.02 * h, 0)), int(min(y0 + 0.02 * h + 1, h))
-        if sy1 > sy0:
+        if sy1 > sy0 and not getattr(self, 'no_streak', False):
             ys, xs = np.mgrid[sy0:sy1, 0:w].astype(np.float32)
             st = np.exp(-((ys - y0) / (0.0035 * h)) ** 2) * (np.exp(-np.abs(xs - x0) / (0.18 * w)) * 0.12 +
                                                              np.exp(-np.abs(xs - x0) / (0.04 * w)) * 0.25)
